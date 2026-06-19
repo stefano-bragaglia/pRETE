@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from rete.alpha import AlphaMemory
+    from rete.beta import LeftNode
 
 
 @dataclass(eq=False)
@@ -25,7 +26,7 @@ class WME:
     attribute: str
     value: str
     alpha_memories: list[AlphaMemory] = field(default_factory=list, repr=False)
-    beta_tokens: list = field(default_factory=list, repr=False)
+    beta_tokens: list[tuple[Token, LeftNode]] = field(default_factory=list, repr=False)
 
 
 @dataclass

@@ -46,7 +46,7 @@ def test_add_production_two_conditions_creates_beta_memory():
     pn = net.add_production(
         _prod([Condition("b1", "color", "red"), Condition("b1", "size", "large")])
     )
-    assert isinstance(pn.parent_join.beta_memory, BetaMemory)
+    assert isinstance(pn.parent_join.left_input, BetaMemory)
 
 
 def test_add_production_pnode_parent_join_set():
@@ -87,7 +87,7 @@ def test_add_two_productions_share_beta_memory():
     c0 = Condition("b1", "color", "red")
     pn1 = net.add_production(_prod([c0, Condition("b1", "size", "large")]))
     pn2 = net.add_production(_prod([c0, Condition("b2", "weight", "heavy")]))
-    assert pn1.parent_join.beta_memory is pn2.parent_join.beta_memory
+    assert pn1.parent_join.left_input is pn2.parent_join.left_input
 
 
 def test_add_two_productions_independent_pnodes():
@@ -171,7 +171,7 @@ def test_remove_production_gc_orphan_beta_memory():
         _prod([Condition("b1", "color", "red"), Condition("b1", "size", "large")])
     )
     jn2 = pn.parent_join
-    bm = jn2.beta_memory
+    bm = jn2.left_input
     assert isinstance(bm, BetaMemory)
     jn1 = bm.parent_join
     net.remove_production(pn)
@@ -193,7 +193,7 @@ def test_remove_production_preserves_shared_beta_memory():
     c0 = Condition("b1", "color", "red")
     pn1 = net.add_production(_prod([c0, Condition("b1", "size", "large")]))
     net.add_production(_prod([c0, Condition("b2", "weight", "heavy")]))
-    bm = pn1.parent_join.beta_memory
+    bm = pn1.parent_join.left_input
     assert isinstance(bm, BetaMemory)
     net.remove_production(pn1)
     assert bm in bm.parent_join.children

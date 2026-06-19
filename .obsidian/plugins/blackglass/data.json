@@ -1,0 +1,15 @@
+{
+  "claudeBinaryPath": "claude",
+  "workingDirectory": "",
+  "quickAskModel": "claude-sonnet-4-6",
+  "autoOpenOnStartup": true,
+  "resumeLastSession": true,
+  "fontSize": 14,
+  "fontFamily": "SauceCodePro Nerd Font Mono",
+  "fontWeight": "normal",
+  "mcpServerEnabled": true,
+  "mcpServerPort": 27123,
+  "mcpReadOnly": false,
+  "skipPermissions": true,
+  "scrollback": 5000
+}
