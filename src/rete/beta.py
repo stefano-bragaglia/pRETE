@@ -99,6 +99,7 @@ class BetaMemory:
 
     items: list[Token] = field(default_factory=list)
     successors: list = field(default_factory=list, repr=False)
+    parent_join: JoinNode | None = field(default=None, repr=False)
 
     def left_activate(self, token: Token) -> None:
         """Store *token* and notify downstream join nodes.
@@ -189,6 +190,20 @@ class JoinNode:
                 if extended.wmes[:-1] == token.wmes:
                     child.left_retract(extended)
 
+    def update_child(self, new_child: BetaMemory | PNode) -> None:
+        """Initialise *new_child* with all matches already held by this node.
+
+        Called immediately after attaching a new downstream child so it
+        catches up with WMEs already in the network.
+
+        :param new_child: a newly created :class:`BetaMemory` or :class:`PNode`
+        :see: Doorenbos §2.6 ``update-new-node-with-matches-from-above``
+        """
+        for token in self.beta_memory.items:
+            for wme in self.alpha_memory.items:
+                if self._passes_tests(token, wme):
+                    new_child.left_activate(Token(wmes=token.wmes + (wme,)))
+
     def _passes_tests(self, token: Token, wme: WME) -> bool:
         """Return ``True`` iff *wme* is consistent with *token* for all join tests.
 
@@ -248,6 +263,7 @@ class PNode:
     production: Production
     conflict_set: list[Instantiation]
     items: list[Token] = field(default_factory=list)
+    parent_join: JoinNode | None = field(default=None, repr=False)
 
     def left_activate(self, token: Token) -> None:
         """Record a full match.
