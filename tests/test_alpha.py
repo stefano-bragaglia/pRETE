@@ -6,7 +6,6 @@ from rete.alpha import (
     AlphaMemory,
     AlphaNode,
     RootNode,
-    build_or_share_alpha_memory,
     build_or_share_alpha_node,
 )
 from rete.condition import WILDCARD, Condition
@@ -163,7 +162,7 @@ def test_build_or_share_different_symbol_creates_new():
 def test_build_or_share_alpha_memory_constant_condition():
     root = RootNode()
     cond = Condition("b1", "color", "red")
-    mem = build_or_share_alpha_memory(root, cond)
+    mem = root.build_or_share_alpha_memory(cond)
     assert isinstance(mem, AlphaMemory)
     w = WME("b1", "color", "red")
     root.activate(w)
@@ -173,7 +172,7 @@ def test_build_or_share_alpha_memory_constant_condition():
 def test_build_or_share_alpha_memory_wrong_wme_excluded():
     root = RootNode()
     cond = Condition("b1", "color", "red")
-    mem = build_or_share_alpha_memory(root, cond)
+    mem = root.build_or_share_alpha_memory(cond)
     w = WME("b1", "color", "blue")
     root.activate(w)
     assert w not in mem.items
@@ -182,7 +181,7 @@ def test_build_or_share_alpha_memory_wrong_wme_excluded():
 def test_build_or_share_alpha_memory_wildcard_skipped():
     root = RootNode()
     cond = Condition(WILDCARD, "color", WILDCARD)
-    mem = build_or_share_alpha_memory(root, cond)
+    mem = root.build_or_share_alpha_memory(cond)
     w = WME("anything", "color", "whatever")
     root.activate(w)
     assert w in mem.items
@@ -191,7 +190,7 @@ def test_build_or_share_alpha_memory_wildcard_skipped():
 def test_build_or_share_alpha_memory_variable_skipped():
     root = RootNode()
     cond = Condition("?x", "color", "?v")
-    mem = build_or_share_alpha_memory(root, cond)
+    mem = root.build_or_share_alpha_memory(cond)
     w = WME("b1", "color", "red")
     root.activate(w)
     assert w in mem.items
@@ -201,8 +200,8 @@ def test_build_or_share_alpha_memory_shared_prefix():
     root = RootNode()
     cond1 = Condition(WILDCARD, "color", "red")
     cond2 = Condition(WILDCARD, "color", "blue")
-    build_or_share_alpha_memory(root, cond1)
-    build_or_share_alpha_memory(root, cond2)
+    root.build_or_share_alpha_memory(cond1)
+    root.build_or_share_alpha_memory(cond2)
     # Both conditions share the attribute=="color" node at root level
     assert len(root.children) == 1
     color_node = root.children[0]
@@ -214,7 +213,7 @@ def test_build_or_share_alpha_memory_shared_prefix():
 def test_build_or_share_alpha_memory_all_wildcards():
     root = RootNode()
     cond = Condition(WILDCARD, WILDCARD, WILDCARD)
-    mem = build_or_share_alpha_memory(root, cond)
+    mem = root.build_or_share_alpha_memory(cond)
     assert isinstance(mem, AlphaMemory)
     w = WME("x", "y", "z")
     root.activate(w)

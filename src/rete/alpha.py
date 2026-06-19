@@ -96,6 +96,38 @@ class RootNode:
         if self._wildcard_memory is not None:
             self._wildcard_memory.activate(wme)
 
+    def build_or_share_alpha_memory(self, condition: Condition) -> AlphaMemory:
+        """Build or retrieve the :class:`AlphaMemory` for *condition*'s constant tests.
+
+        Walks the three fields in order, adding alpha nodes only for constant
+        tests.  Wildcards and ``?``-variables add no node.  If every field is
+        non-constant the memory is attached to this root directly.
+
+        :param condition: the condition whose constant fields are compiled
+        :returns: the :class:`AlphaMemory` at the end of the chain
+        :see: Doorenbos §2.2
+        """
+        tests = [
+            ("id", condition.id_test),
+            ("attribute", condition.attribute_test),
+            ("value", condition.value_test),
+        ]
+        constants = [(f, s) for f, s in tests if _is_constant(s)]
+
+        if not constants:
+            # ponytail: all-wildcard/variable — memory lives directly on root
+            if self._wildcard_memory is None:
+                self._wildcard_memory = AlphaMemory()
+            return self._wildcard_memory
+
+        current: RootNode | AlphaNode = self
+        for f, s in constants:
+            current = build_or_share_alpha_node(current, f, s)
+
+        if current.output_memory is None:
+            current.output_memory = AlphaMemory()
+        return current.output_memory
+
 
 def build_or_share_alpha_node(
     parent: RootNode | AlphaNode,
@@ -123,36 +155,3 @@ def build_or_share_alpha_node(
 def _is_constant(test: object) -> bool:
     """Return ``True`` iff *test* is a plain constant (not wildcard, not variable)."""
     return isinstance(test, str) and not test.startswith("?")
-
-
-def build_or_share_alpha_memory(root: RootNode, condition: Condition) -> AlphaMemory:
-    """Build or retrieve the :class:`AlphaMemory` for *condition*'s constant tests.
-
-    Walks the three fields in order, adding alpha nodes only for constant
-    tests. Wildcards and ``?``-variables add no node. If every field is
-    non-constant the memory is attached to *root* directly.
-
-    :param root: the root of the alpha network
-    :param condition: the condition whose constant fields are compiled
-    :returns: the :class:`AlphaMemory` at the end of the chain
-    """
-    tests = [
-        ("id", condition.id_test),
-        ("attribute", condition.attribute_test),
-        ("value", condition.value_test),
-    ]
-    constants = [(f, s) for f, s in tests if _is_constant(s)]
-
-    if not constants:
-        # ponytail: all-wildcard/variable — memory lives directly on root
-        if root._wildcard_memory is None:
-            root._wildcard_memory = AlphaMemory()
-        return root._wildcard_memory
-
-    current: RootNode | AlphaNode = root
-    for f, s in constants:
-        current = build_or_share_alpha_node(current, f, s)
-
-    if current.output_memory is None:
-        current.output_memory = AlphaMemory()
-    return current.output_memory
