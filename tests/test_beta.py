@@ -45,7 +45,7 @@ def _make_join(tests=None, left=None):
     beta = left if left is not None else BetaMemory()
     child = BetaMemory()
     jn = JoinNode(
-        children=[child], alpha_memory=am, beta_memory=beta, tests=tests or []
+        children=[child], alpha_memory=am, left_input=beta, tests=tests or []
     )
     return jn, am, child
 
@@ -336,9 +336,9 @@ def test_two_join_nodes_chain():
     bm2 = BetaMemory()
     top = DummyTopNode()
 
-    jn2 = JoinNode(children=[bm2], alpha_memory=am2, beta_memory=bm1, tests=[])
+    jn2 = JoinNode(children=[bm2], alpha_memory=am2, left_input=bm1, tests=[])
     bm1.successors = [jn2]
-    jn1 = JoinNode(children=[bm1], alpha_memory=am1, beta_memory=top, tests=[])
+    jn1 = JoinNode(children=[bm1], alpha_memory=am1, left_input=top, tests=[])
     am1.successors = [jn1]
     am2.successors = [jn2]
 
@@ -425,7 +425,7 @@ def test_join_node_with_pnode_child_right_activate():
     cs: list[Instantiation] = []
     pn = PNode(production=p, conflict_set=cs)
     am = AlphaMemory()
-    jn = JoinNode(children=[pn], alpha_memory=am, beta_memory=DummyTopNode(), tests=[])
+    jn = JoinNode(children=[pn], alpha_memory=am, left_input=DummyTopNode(), tests=[])
     w = WME("b1", "color", "red")
     jn.right_activate(w)
     assert len(cs) == 1
@@ -438,7 +438,7 @@ def test_join_node_with_pnode_child_right_retract():
     cs: list[Instantiation] = []
     pn = PNode(production=p, conflict_set=cs)
     am = AlphaMemory()
-    jn = JoinNode(children=[pn], alpha_memory=am, beta_memory=DummyTopNode(), tests=[])
+    jn = JoinNode(children=[pn], alpha_memory=am, left_input=DummyTopNode(), tests=[])
     w = WME("b1", "color", "red")
     jn.right_activate(w)
     jn.right_retract(w)
@@ -458,9 +458,9 @@ def test_chain_retract_wme_cascades():
     bm2 = BetaMemory()
     top = DummyTopNode()
 
-    jn2 = JoinNode(children=[bm2], alpha_memory=am2, beta_memory=bm1, tests=[])
+    jn2 = JoinNode(children=[bm2], alpha_memory=am2, left_input=bm1, tests=[])
     bm1.successors = [jn2]
-    jn1 = JoinNode(children=[bm1], alpha_memory=am1, beta_memory=top, tests=[])
+    jn1 = JoinNode(children=[bm1], alpha_memory=am1, left_input=top, tests=[])
     am1.successors = [jn1]
     am2.successors = [jn2]
 

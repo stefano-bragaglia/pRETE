@@ -4,11 +4,33 @@
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from rete.alpha import AlphaMemory
 from rete.condition import Condition, Production
 from rete.wme import Token, WME
+
+
+class LeftNode(Protocol):
+    """Structural protocol for nodes that receive left (token) activations.
+
+    :see: Doorenbos §2.4
+    """
+
+    def left_activate(self, token: Token) -> None: ...
+    def left_retract(self, token: Token) -> None: ...
+
+
+class RightNode(Protocol):
+    """Structural protocol for nodes that receive right (WME) activations.
+
+    :see: Doorenbos §2.4
+    """
+
+    def right_activate(self, wme: WME) -> None: ...
+    def right_retract(self, wme: WME) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -98,7 +120,7 @@ class BetaMemory:
     """
 
     items: list[Token] = field(default_factory=list)
-    successors: list = field(default_factory=list, repr=False)
+    successors: list[LeftNode] = field(default_factory=list, repr=False)
     parent_join: JoinNode | NegativeJoinNode | NccNode | None = field(
         default=None, repr=False
     )
@@ -146,7 +168,32 @@ class DummyTopNode:
 
 
 @dataclass
-class JoinNode:
+class BaseJoinNode:
+    """Shared fields and consistency-test logic for join and negative join nodes.
+
+    :see: Doorenbos §2.4, §2.7
+    """
+
+    children: list[LeftNode] = field(default_factory=list, repr=False)
+    alpha_memory: AlphaMemory = field(default_factory=AlphaMemory)
+    tests: list[JoinTest] = field(default_factory=list)
+
+    def _passes_tests(self, token: Token, wme: WME) -> bool:
+        """Return ``True`` iff *wme* is consistent with *token* for all join tests.
+
+        :param token: existing partial match
+        :param wme: candidate WME to join or test
+        """
+        for test in self.tests:
+            wme_val = getattr(wme, test.field_of_wme)
+            tok_val = getattr(token.wmes[test.condition_index], test.field_of_token_wme)
+            if wme_val != tok_val:
+                return False
+        return True
+
+
+@dataclass
+class JoinNode(BaseJoinNode):
     """Inter-element join node with two inputs (left = beta, right = alpha).
 
     On activation, iterates the opposite memory and emits extended tokens for
@@ -157,17 +204,14 @@ class JoinNode:
     :see: Doorenbos §2.4
     """
 
-    children: list = field(default_factory=list, repr=False)
-    alpha_memory: AlphaMemory = field(default_factory=AlphaMemory)
-    beta_memory: BetaMemory | DummyTopNode = field(default_factory=DummyTopNode)
-    tests: list[JoinTest] = field(default_factory=list)
+    left_input: BetaMemory | DummyTopNode = field(default_factory=DummyTopNode)
 
     def right_activate(self, wme: WME) -> None:
         """Handle a new WME arriving in the alpha memory (right input).
 
         :param wme: the WME that just entered the alpha memory
         """
-        for token in self.beta_memory.items:
+        for token in self.left_input.items:
             if self._passes_tests(token, wme):
                 self._extend_and_emit(token, wme)
 
@@ -208,23 +252,10 @@ class JoinNode:
         :param new_child: a newly created :class:`BetaMemory` or :class:`PNode`
         :see: Doorenbos §2.6 ``update-new-node-with-matches-from-above``
         """
-        for token in self.beta_memory.items:
+        for token in self.left_input.items:
             for wme in self.alpha_memory.items:
                 if self._passes_tests(token, wme):
                     new_child.left_activate(Token(wmes=token.wmes + (wme,)))
-
-    def _passes_tests(self, token: Token, wme: WME) -> bool:
-        """Return ``True`` iff *wme* is consistent with *token* for all join tests.
-
-        :param token: existing partial match
-        :param wme: candidate WME to join
-        """
-        for test in self.tests:
-            wme_val = getattr(wme, test.field_of_wme)
-            tok_val = getattr(token.wmes[test.condition_index], test.field_of_token_wme)
-            if wme_val != tok_val:
-                return False
-        return True
 
     def _extend_and_emit(self, token: Token, wme: WME) -> None:
         """Create an extended token and send it downstream.
@@ -249,7 +280,7 @@ class NegativeToken:
 
 
 @dataclass
-class NegativeJoinNode:
+class NegativeJoinNode(BaseJoinNode):
     """Negated join node: propagates a token downstream only while count is zero.
 
     On WME add the count of matching tokens is incremented (possibly retracting
@@ -258,10 +289,7 @@ class NegativeJoinNode:
     :see: Forgy §2.3, Doorenbos §2.7
     """
 
-    children: list = field(default_factory=list, repr=False)
-    alpha_memory: AlphaMemory = field(default_factory=AlphaMemory)
     left_input: BetaMemory | DummyTopNode = field(default_factory=DummyTopNode)
-    tests: list[JoinTest] = field(default_factory=list)
     items: list[NegativeToken] = field(default_factory=list)
 
     def left_activate(self, token: Token) -> None:
@@ -330,20 +358,7 @@ class NegativeJoinNode:
             1 for wme in self.alpha_memory.items if self._passes_tests(token, wme)
         )
 
-    def _passes_tests(self, token: Token, wme: WME) -> bool:
-        """Return ``True`` iff *wme* is consistent with *token* for all join tests.
-
-        :param token: existing partial match
-        :param wme: candidate WME to test
-        """
-        for test in self.tests:
-            wme_val = getattr(wme, test.field_of_wme)
-            tok_val = getattr(token.wmes[test.condition_index], test.field_of_token_wme)
-            if wme_val != tok_val:
-                return False
-        return True
-
-    def _initialize_from(self, tokens: object) -> None:
+    def _initialize_from(self, tokens: Iterable[Token]) -> None:
         """Seed this node by left-activating each token in *tokens*.
 
         :param tokens: an iterable of :class:`Token` objects
@@ -379,9 +394,9 @@ class NccPartnerNode:
     :see: Doorenbos §2.8
     """
 
+    ncc_node: NccNode = field(repr=False)
     items: list[Token] = field(default_factory=list)
-    ncc_node: NccNode | None = field(default=None, repr=False)
-    sub_last_join: JoinNode | None = field(default=None, repr=False)
+    sub_last_join: JoinNode = field(init=False, repr=False)
 
     def left_activate(self, token: Token) -> None:
         """Forward *token* to the NCC node, buffering if no owner token yet.
@@ -425,6 +440,16 @@ class NccPartnerNode:
         else:
             self.ncc_node.new_result_buffer.remove(token)
 
+    def remove_result(self, token: Token) -> None:
+        """Remove *token* from this node's ``items`` list.
+
+        Called by :meth:`NccNode._retract_partner_results` to keep partner
+        state encapsulated.
+
+        :param token: the result token to remove
+        """
+        self.items.remove(token)
+
     def _find_ncc_token(self, owner_wmes: tuple) -> NccToken | None:
         """Return the :class:`NccToken` matching *owner_wmes*, or ``None``.
 
@@ -448,9 +473,9 @@ class NccNode:
     :see: Doorenbos §2.8
     """
 
-    children: list = field(default_factory=list, repr=False)
-    partner: NccPartnerNode | None = field(default=None, repr=False)
+    children: list[LeftNode] = field(default_factory=list, repr=False)
     items: list[NccToken] = field(default_factory=list)
+    partner: NccPartnerNode = field(init=False, repr=False)
     new_result_buffer: list[Token] = field(default_factory=list)
     owner_length: int = 0
     left_input: BetaMemory | DummyTopNode = field(default_factory=DummyTopNode)
@@ -516,7 +541,7 @@ class NccNode:
         :param ncc_tok: the NCC token whose results are being cleaned up
         """
         for result in list(ncc_tok.results):
-            self.partner.items.remove(result)
+            self.partner.remove_result(result)
         ncc_tok.results.clear()
 
 

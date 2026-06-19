@@ -5,9 +5,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from rete.condition import Condition
 from rete.wme import WME
+
+if TYPE_CHECKING:
+    from rete.beta import RightNode
 
 
 @dataclass
@@ -20,7 +24,7 @@ class AlphaMemory:
     """
 
     items: list[WME] = field(default_factory=list)
-    successors: list = field(default_factory=list, repr=False)
+    successors: list[RightNode] = field(default_factory=list, repr=False)
 
     def activate(self, wme: WME) -> None:
         """Store *wme* and register this memory on the WME's back-pointer list.

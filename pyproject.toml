@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "RETE"
+version = "0.0.1"
+description = ""
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "ruff"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rete"]
+
+[tool.hatch.envs.default.scripts]
+# hatch run lint | test | check
+lint = "ruff check src/ tests/"
+test = "pytest --cov"
+check = ["ruff check src/ tests/", "pytest --cov"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "C90"]  # pycodestyle, pyflakes, mccabe complexity
+mccabe.max-complexity = 5   # enforces cyclomatic complexity grade A
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/rete"]
+
+[tool.coverage.report]
+fail_under = 80

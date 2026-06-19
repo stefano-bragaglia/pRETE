@@ -18,7 +18,7 @@ class InferenceEngine:
     """Wraps :class:`ReteNetwork` with a select-and-fire loop.
 
     The ``strategy`` callable picks one :class:`Instantiation` from the
-    conflict set each cycle; the default is :func:`recency_strategy`.
+    conflict set each cycle; the default is :meth:`recency_strategy`.
 
     :see: Forgy §1.1
     """

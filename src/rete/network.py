@@ -211,11 +211,11 @@ class ReteNetwork:
         for jn in am.successors:
             if (
                 isinstance(jn, JoinNode)
-                and jn.beta_memory is left
+                and jn.left_input is left
                 and jn.tests == tests
             ):
                 return jn
-        jn = JoinNode(children=[], alpha_memory=am, beta_memory=left, tests=tests)
+        jn = JoinNode(children=[], alpha_memory=am, left_input=left, tests=tests)
         am.successors.append(jn)
         if isinstance(left, BetaMemory):
             left.successors.append(jn)
@@ -295,9 +295,9 @@ class ReteNetwork:
         if jn.children:
             return
         jn.alpha_memory.successors.remove(jn)
-        if isinstance(jn.beta_memory, BetaMemory):
-            jn.beta_memory.successors.remove(jn)
-            self._gc_beta_memory(jn.beta_memory)
+        if isinstance(jn.left_input, BetaMemory):
+            jn.left_input.successors.remove(jn)
+            self._gc_beta_memory(jn.left_input)
 
     def _gc_negative_join_node(self, njn: NegativeJoinNode) -> None:
         """Remove *njn* from the network if it has no remaining children.
@@ -324,10 +324,8 @@ class ReteNetwork:
         if isinstance(ncc.left_input, BetaMemory):
             ncc.left_input.successors.remove(ncc)
             self._gc_beta_memory(ncc.left_input)
-        partner = ncc.partner
-        if partner and partner.sub_last_join:
-            partner.sub_last_join.children.remove(partner)
-            self._gc_join_node(partner.sub_last_join)
+        ncc.partner.sub_last_join.children.remove(ncc.partner)
+        self._gc_join_node(ncc.partner.sub_last_join)
 
     def _gc_beta_memory(self, bm: BetaMemory) -> None:
         """Remove *bm* from the network if it has no remaining successors.
