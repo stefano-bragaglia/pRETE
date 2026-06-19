@@ -5,7 +5,7 @@
 from rete.beta import BetaMemory, JoinNode, NccNode, PNode
 from rete.condition import Condition, NccGroup, Production
 from rete.network import ReteNetwork
-from rete.wme import WME
+from rete.fact import WME
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from rete.condition import Condition
-from rete.wme import WME
+from rete.fact import WME
 
 if TYPE_CHECKING:
     from rete.beta import RightNode

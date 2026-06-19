@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from rete.wme import Token, WME
+from rete.fact import Token, WME
 
 # Sentinel: match any field value without binding (Doorenbos §2.2).
 # Variables use the '?' prefix convention; binding is resolved in join nodes (Phase 3).

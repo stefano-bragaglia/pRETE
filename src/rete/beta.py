@@ -10,7 +10,7 @@ from typing import Protocol
 
 from rete.alpha import AlphaMemory
 from rete.condition import Condition, Production
-from rete.wme import Token, WME
+from rete.fact import Token, WME
 
 
 class LeftNode(Protocol):

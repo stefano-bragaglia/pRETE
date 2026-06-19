@@ -5,7 +5,7 @@
 from rete.beta import Instantiation, PNode
 from rete.condition import Condition, Production
 from rete.engine import InferenceEngine
-from rete.wme import Token, WME
+from rete.fact import Token, WME
 
 
 # ---------------------------------------------------------------------------

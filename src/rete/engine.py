@@ -10,7 +10,7 @@ from typing import Callable
 from rete.beta import Instantiation, PNode
 from rete.condition import Production
 from rete.network import ReteNetwork
-from rete.wme import WME
+from rete.fact import WME
 
 
 @dataclass
