@@ -107,6 +107,8 @@ class BetaMemory:
         :param token: the new partial match
         """
         self.items.append(token)
+        if token.wmes:
+            token.wmes[-1].beta_tokens.append((token, self))
         for s in self.successors:
             s.left_activate(token)
 
@@ -115,6 +117,8 @@ class BetaMemory:
 
         :param token: the partial match being retracted
         """
+        if token.wmes:
+            token.wmes[-1].beta_tokens.remove((token, self))
         self.items.remove(token)
         for s in self.successors:
             s.left_retract(token)
@@ -173,11 +177,8 @@ class JoinNode:
 
         :param wme: the WME being retracted
         """
-        # ponytail: O(n) scan per child; upgrade to wme.beta_tokens in Phase 6.
-        for child in self.children:
-            for extended in list(child.items):
-                if self._is_derived_from_wme(extended, wme):
-                    child.left_retract(extended)
+        for token, mem in list(wme.beta_tokens):
+            mem.left_retract(token)
 
     def left_retract(self, token: Token) -> None:
         """Handle removal of a token from the beta memory.
@@ -227,15 +228,6 @@ class JoinNode:
         for child in self.children:
             child.left_activate(extended)
 
-    @staticmethod
-    def _is_derived_from_wme(token: Token, wme: WME) -> bool:
-        """Return ``True`` iff *token*'s last WME is *wme* (by identity).
-
-        :param token: candidate extended token
-        :param wme: the WME being retracted
-        """
-        return bool(token.wmes) and token.wmes[-1] is wme
-
 
 @dataclass
 class Instantiation:
@@ -271,6 +263,8 @@ class PNode:
         :param token: the complete match token arriving from the last join node
         """
         self.items.append(token)
+        if token.wmes:
+            token.wmes[-1].beta_tokens.append((token, self))
         self.conflict_set.append(Instantiation(self.production, token))
 
     def left_retract(self, token: Token) -> None:
@@ -278,6 +272,8 @@ class PNode:
 
         :param token: the complete match token being retracted
         """
+        if token.wmes:
+            token.wmes[-1].beta_tokens.remove((token, self))
         self.items.remove(token)
         self.conflict_set.remove(Instantiation(self.production, token))
 

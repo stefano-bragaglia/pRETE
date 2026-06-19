@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from rete.alpha import AlphaMemory, RootNode
 from rete.beta import BetaMemory, DummyTopNode, Instantiation, JoinNode, JoinTest, PNode
 from rete.condition import Condition, Production
+from rete.wme import WME
 
 
 @dataclass
@@ -24,6 +25,23 @@ class ReteNetwork:
     root: RootNode = field(default_factory=RootNode)
     dummy_top: DummyTopNode = field(default_factory=DummyTopNode)
     conflict_set: list[Instantiation] = field(default_factory=list)
+
+    def add_wme(self, wme: WME) -> None:
+        """Feed *wme* into the alpha network, triggering all matching join nodes.
+
+        :param wme: the WME to assert
+        :see: Doorenbos §2.5 ``add-wme``
+        """
+        self.root.activate(wme)
+
+    def remove_wme(self, wme: WME) -> None:
+        """Retract *wme* from all alpha memories and propagate through the network.
+
+        :param wme: the WME to retract
+        :see: Doorenbos §2.5 ``remove-wme``
+        """
+        for am in list(wme.alpha_memories):
+            am.deactivate(wme)
 
     def add_production(self, production: Production) -> PNode:
         """Compile *production* into the network and return its terminal PNode.
