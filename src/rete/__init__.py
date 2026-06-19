@@ -3,6 +3,7 @@
 from rete.alpha import AlphaMemory, AlphaNode, RootNode
 from rete.beta import BetaMemory, DummyTopNode, Instantiation, JoinNode, JoinTest, PNode
 from rete.condition import WILDCARD, Condition, Production
+from rete.network import ReteNetwork
 from rete.wme import Token, WME
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "JoinTest",
     "PNode",
     "Production",
+    "ReteNetwork",
     "RootNode",
     "Token",
     "WILDCARD",
