@@ -110,16 +110,38 @@ class RootNode:
     children: list[AlphaNode] = field(default_factory=list)
     # ponytail: all-wildcard conditions attach their AlphaMemory here directly
     _wildcard_memory: AlphaMemory | None = field(default=None, repr=False)
+    _wmes: list[WME] = field(default_factory=list, repr=False)
 
     def activate(self, wme: WME) -> None:
         """Dispatch *wme* to all child alpha nodes and the wildcard memory.
 
         :param wme: the WME entering the alpha network
         """
+        self._wmes.append(wme)
         for child in self.children:
             child.activate(wme)
         if self._wildcard_memory is not None:
             self._wildcard_memory.activate(wme)
+
+    def deactivate(self, wme: WME) -> None:
+        """Remove *wme* from the global WME store.
+
+        :param wme: the WME being retracted
+        """
+        self._wmes.remove(wme)
+
+    def _replay_into(self, am: AlphaMemory, constants: list[tuple[str, str]]) -> None:
+        """Feed any stored WMEs that satisfy *constants* into *am*.
+
+        Called only when a new :class:`AlphaMemory` is created, so WMEs added
+        before the production's alpha memory existed are not lost.
+
+        :param am: the freshly created alpha memory to seed
+        :param constants: list of ``(field, symbol)`` pairs that must all match
+        """
+        for wme in self._wmes:
+            if all(getattr(wme, f) == s for f, s in constants):
+                am.activate(wme)
 
     def build_or_share_alpha_memory(self, condition: Condition) -> AlphaMemory:
         """Build or retrieve the :class:`AlphaMemory` for *condition*'s constant tests.
@@ -143,6 +165,7 @@ class RootNode:
             # ponytail: all-wildcard/variable — memory lives directly on root
             if self._wildcard_memory is None:
                 self._wildcard_memory = AlphaMemory()
+                self._replay_into(self._wildcard_memory, constants)
             return self._wildcard_memory
 
         current: RootNode | AlphaNode = self
@@ -151,6 +174,7 @@ class RootNode:
 
         if current.output_memory is None:
             current.output_memory = AlphaMemory()
+            self._replay_into(current.output_memory, constants)
         return current.output_memory
 
 

@@ -501,6 +501,7 @@ def _make_njn(tests=None, left=None):
         left_input=left if left is not None else DummyTopNode(),
         tests=tests or [],
     )
+    am.successors.append(njn)  # maintain right_unlinked=False invariant
     return njn, am, rec
 
 
