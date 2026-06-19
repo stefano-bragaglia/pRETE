@@ -1,7 +1,9 @@
-![[pRETE-logo.png]]
 # pRETE (Python RETE)
 
 A pure-Python implementation of the Rete algorithm for production rule systems.
+
+![pRETE logo](images/pRETE-logo-small.png)
+
 ## Background
 
 Implements the algorithm from:
