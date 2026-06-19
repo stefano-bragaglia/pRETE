@@ -60,6 +60,27 @@ class AlphaNode:
     children: list[AlphaNode] = field(default_factory=list, repr=False)
     output_memory: AlphaMemory | None = field(default=None, repr=False)
 
+    @staticmethod
+    def build_or_share(
+        parent: RootNode | AlphaNode,
+        field: str,
+        symbol: str,
+    ) -> AlphaNode:
+        """Return an existing child of *parent* with ``(field, symbol)``, or create one.
+
+        :param parent: the node whose children list is searched
+        :param field: ``'id'``, ``'attribute'``, or ``'value'``
+        :param symbol: the constant string to match
+        :returns: a shared or newly-created :class:`AlphaNode`
+        :see: Doorenbos §2.2
+        """
+        for child in parent.children:
+            if child.field == field and child.symbol == symbol:
+                return child
+        node = AlphaNode(field=field, symbol=symbol)
+        parent.children.append(node)
+        return node
+
     def activate(self, wme: WME) -> None:
         """Propagate *wme* if it matches this node's constant test.
 
@@ -112,7 +133,7 @@ class RootNode:
             ("attribute", condition.attribute_test),
             ("value", condition.value_test),
         ]
-        constants = [(f, s) for f, s in tests if _is_constant(s)]
+        constants = [(f, s) for f, s in tests if Condition._is_constant(s)]
 
         if not constants:
             # ponytail: all-wildcard/variable — memory lives directly on root
@@ -122,36 +143,10 @@ class RootNode:
 
         current: RootNode | AlphaNode = self
         for f, s in constants:
-            current = build_or_share_alpha_node(current, f, s)
+            current = AlphaNode.build_or_share(current, f, s)
 
         if current.output_memory is None:
             current.output_memory = AlphaMemory()
         return current.output_memory
 
 
-def build_or_share_alpha_node(
-    parent: RootNode | AlphaNode,
-    field: str,
-    symbol: str,
-) -> AlphaNode:
-    """Return an existing child of *parent* with ``(field, symbol)``, or create one.
-
-    This is the key sharing step: two conditions whose constant tests are
-    identical converge on the same node in the network.
-
-    :param parent: the node whose children list is searched
-    :param field: ``'id'``, ``'attribute'``, or ``'value'``
-    :param symbol: the constant string to match
-    :returns: a shared or newly-created :class:`AlphaNode`
-    """
-    for child in parent.children:
-        if child.field == field and child.symbol == symbol:
-            return child
-    node = AlphaNode(field=field, symbol=symbol)
-    parent.children.append(node)
-    return node
-
-
-def _is_constant(test: object) -> bool:
-    """Return ``True`` iff *test* is a plain constant (not wildcard, not variable)."""
-    return isinstance(test, str) and not test.startswith("?")

@@ -32,6 +32,14 @@ class Condition:
     negated: bool = False
 
     @staticmethod
+    def _is_constant(test: object) -> bool:
+        """Return ``True`` iff *test* is a plain constant (not wildcard, not variable).
+
+        :param test: a condition field test value
+        """
+        return isinstance(test, str) and not test.startswith("?")
+
+    @staticmethod
     def _field_matches(test: object, value: str) -> bool:
         """Test a single field against a candidate value.
 
