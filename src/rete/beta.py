@@ -177,6 +177,8 @@ class BaseJoinNode:
     children: list[LeftNode] = field(default_factory=list, repr=False)
     alpha_memory: AlphaMemory = field(default_factory=AlphaMemory)
     tests: list[JoinTest] = field(default_factory=list)
+    right_unlinked: bool = field(default=False, repr=False)
+    left_unlinked: bool = field(default=False, repr=False)
 
     def _passes_tests(self, token: Token, wme: WME) -> bool:
         """Return ``True`` iff *wme* is consistent with *token* for all join tests.
@@ -209,8 +211,14 @@ class JoinNode(BaseJoinNode):
     def right_activate(self, wme: WME) -> None:
         """Handle a new WME arriving in the alpha memory (right input).
 
+        Re-links from beta memory if previously left-unlinked, then joins.
+
         :param wme: the WME that just entered the alpha memory
         """
+        if self.left_unlinked:
+            if isinstance(self.left_input, BetaMemory):
+                self.left_input.successors.append(self)
+            self.left_unlinked = False
         for token in self.left_input.items:
             if self._passes_tests(token, wme):
                 self._extend_and_emit(token, wme)
@@ -218,8 +226,13 @@ class JoinNode(BaseJoinNode):
     def left_activate(self, token: Token) -> None:
         """Handle a new token arriving in the beta memory (left input).
 
+        Re-links from alpha memory if previously right-unlinked, then joins.
+
         :param token: the partial match that just entered the beta memory
         """
+        if self.right_unlinked:
+            self.alpha_memory.successors.append(self)
+            self.right_unlinked = False
         for wme in self.alpha_memory.items:
             if self._passes_tests(token, wme):
                 self._extend_and_emit(token, wme)
@@ -227,21 +240,31 @@ class JoinNode(BaseJoinNode):
     def right_retract(self, wme: WME) -> None:
         """Handle removal of a WME from the alpha memory.
 
+        Left-unlinks from beta memory when the alpha memory drains to zero.
+
         :param wme: the WME being retracted
         """
         for token, mem in list(wme.beta_tokens):
             mem.left_retract(token)
+        if len(self.alpha_memory.items) == 1 and not self.left_unlinked:
+            if isinstance(self.left_input, BetaMemory):
+                self.left_input.successors.remove(self)
+            self.left_unlinked = True
 
     def left_retract(self, token: Token) -> None:
         """Handle removal of a token from the beta memory.
 
+        Right-unlinks from alpha memory when the beta memory drains to zero.
+
         :param token: the partial match being retracted
         """
-        # ponytail: O(n) scan per child; upgrade to wme.beta_tokens in Phase 6.
         for child in self.children:
             for extended in list(child.items):
                 if extended.wmes[:-1] == token.wmes:
                     child.left_retract(extended)
+        if not self.left_input.items and not self.right_unlinked:
+            self.alpha_memory.successors.remove(self)
+            self.right_unlinked = True
 
     def update_child(self, new_child: BetaMemory | PNode) -> None:
         """Initialise *new_child* with all matches already held by this node.
@@ -295,8 +318,13 @@ class NegativeJoinNode(BaseJoinNode):
     def left_activate(self, token: Token) -> None:
         """Handle a new token from the left input.
 
+        Re-links from alpha memory if previously right-unlinked.
+
         :param token: the partial match entering from the left
         """
+        if self.right_unlinked:
+            self.alpha_memory.successors.append(self)
+            self.right_unlinked = False
         count = self._count_matches(token)
         neg_tok = NegativeToken(token=token, count=count)
         self.items.append(neg_tok)
@@ -331,6 +359,8 @@ class NegativeJoinNode(BaseJoinNode):
     def left_retract(self, token: Token) -> None:
         """Handle removal of a token from the left input.
 
+        Right-unlinks from alpha memory when the items list drains to zero.
+
         :param token: the partial match being retracted
         """
         neg_tok = next(nt for nt in self.items if nt.token is token)
@@ -338,6 +368,9 @@ class NegativeJoinNode(BaseJoinNode):
             for child in self.children:
                 child.left_retract(token)
         self.items.remove(neg_tok)
+        if not self.items and not self.right_unlinked:
+            self.alpha_memory.successors.remove(self)
+            self.right_unlinked = True
 
     def update_child(self, child: object) -> None:
         """Seed *child* with all currently propagated tokens (count == 0).

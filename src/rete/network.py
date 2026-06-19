@@ -50,6 +50,7 @@ class ReteNetwork:
         :param wme: the WME to retract
         :see: Doorenbos §2.5 ``remove-wme``
         """
+        self.root.deactivate(wme)
         for am in list(wme.alpha_memories):
             am.deactivate(wme)
 
@@ -216,9 +217,7 @@ class ReteNetwork:
             ):
                 return jn
         jn = JoinNode(children=[], alpha_memory=am, left_input=left, tests=tests)
-        am.successors.append(jn)
-        if isinstance(left, BetaMemory):
-            left.successors.append(jn)
+        self._init_join_links(jn, left, am)
         return jn
 
     def _build_or_share_negative_join_node(
@@ -242,11 +241,62 @@ class ReteNetwork:
         njn = NegativeJoinNode(
             children=[], alpha_memory=am, left_input=left, tests=tests
         )
-        am.successors.append(njn)
-        if isinstance(left, BetaMemory):
-            left.successors.append(njn)
+        self._init_njn_links(njn, left, am)
         njn._initialize_from(left.items)
         return njn
+
+    def _init_join_links(
+        self,
+        jn: JoinNode,
+        left: BetaMemory | DummyTopNode,
+        am: AlphaMemory,
+    ) -> None:
+        """Set initial link state for a newly built :class:`JoinNode`.
+
+        Right-unlink (preferred) when beta is empty: node stays in bm.successors
+        so a future left activation can re-link it to am.  Left-unlink only when
+        beta is non-empty and alpha is empty: node stays in am.successors.
+        The two states are mutually exclusive.
+
+        :param jn: the newly created join node
+        :param left: its left input
+        :param am: its alpha memory (right input)
+        :see: Doorenbos Ch. 4–5
+        """
+        if isinstance(left, BetaMemory) and not left.items:
+            jn.right_unlinked = True
+            left.successors.append(jn)     # stay in bm so left_activate re-links
+        elif not am.items:
+            jn.left_unlinked = True
+            am.successors.append(jn)        # stay in am so right_activate re-links
+        else:
+            am.successors.append(jn)
+            if isinstance(left, BetaMemory):
+                left.successors.append(jn)
+
+    def _init_njn_links(
+        self,
+        njn: NegativeJoinNode,
+        left: BetaMemory | DummyTopNode,
+        am: AlphaMemory,
+    ) -> None:
+        """Set initial link state for a newly built :class:`NegativeJoinNode`.
+
+        NJN only supports right unlinking (left unlinking would prevent propagation
+        of tokens with count=0 when alpha is empty).
+
+        :param njn: the newly created negative join node
+        :param left: its left input
+        :param am: its alpha memory (right input)
+        :see: Doorenbos Ch. 4
+        """
+        if isinstance(left, BetaMemory) and not left.items:
+            njn.right_unlinked = True
+            left.successors.append(njn)    # stay in bm so left_activate re-links
+        else:
+            am.successors.append(njn)
+            if isinstance(left, BetaMemory):
+                left.successors.append(njn)
 
     @staticmethod
     def _njn_matches(
@@ -289,25 +339,32 @@ class ReteNetwork:
     def _gc_join_node(self, jn: JoinNode) -> None:
         """Remove *jn* from the network if it has no remaining children.
 
+        Guards against double-removal when UL has already unlinked the node.
+
         :param jn: the join node to potentially garbage-collect
         :see: Doorenbos Appendix A ``delete-node-and-any-unused-ancestors``
         """
         if jn.children:
             return
-        jn.alpha_memory.successors.remove(jn)
+        if not jn.right_unlinked:
+            jn.alpha_memory.successors.remove(jn)
         if isinstance(jn.left_input, BetaMemory):
-            jn.left_input.successors.remove(jn)
+            if not jn.left_unlinked:
+                jn.left_input.successors.remove(jn)
             self._gc_beta_memory(jn.left_input)
 
     def _gc_negative_join_node(self, njn: NegativeJoinNode) -> None:
         """Remove *njn* from the network if it has no remaining children.
+
+        Guards against double-removal when UL has already right-unlinked the node.
 
         :param njn: the negative join node to potentially garbage-collect
         :see: Doorenbos Appendix A ``delete-node-and-any-unused-ancestors``
         """
         if njn.children:
             return
-        njn.alpha_memory.successors.remove(njn)
+        if not njn.right_unlinked:
+            njn.alpha_memory.successors.remove(njn)
         if isinstance(njn.left_input, BetaMemory):
             njn.left_input.successors.remove(njn)
             self._gc_beta_memory(njn.left_input)
