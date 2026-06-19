@@ -1,6 +1,6 @@
 """Pure-Python implementation of the Rete algorithm (Forgy 1982, Doorenbos 1995)."""
 
-from rete.alpha import AlphaMemory, AlphaNode, RootNode
+from rete.alpha import AlphaMemory, RootNode
 from rete.beta import (
     BaseJoinNode,
     BetaMemory,
@@ -23,7 +23,6 @@ from rete.fact import Token, WME
 
 __all__ = [
     "AlphaMemory",
-    "AlphaNode",
     "BaseJoinNode",
     "BetaMemory",
     "Condition",

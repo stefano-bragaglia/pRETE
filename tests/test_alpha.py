@@ -170,8 +170,9 @@ def test_root_mro_dispatch():
 
 
 def test_root_predicate_filters_at_dispatch():
-    def is_red(fact: Fact) -> bool:
-        return fact.obj.color == "red"
+    # alpha_tests receive the raw object (fact.obj), not the Fact wrapper
+    def is_red(obj: Block) -> bool:
+        return obj.color == "red"
 
     root = RootNode()
     mem = root.build_or_share_alpha_memory(
@@ -225,8 +226,9 @@ def test_build_or_share_replays_existing_facts():
 
 
 def test_build_or_share_replay_filtered_by_predicate():
-    def is_red(fact: Fact) -> bool:
-        return fact.obj.color == "red"
+    # alpha_tests receive the raw object (fact.obj), not the Fact wrapper
+    def is_red(obj: Block) -> bool:
+        return obj.color == "red"
 
     root = RootNode()
     f = Fact(Block("blue"))
