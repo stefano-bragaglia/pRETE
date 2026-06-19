@@ -6,11 +6,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from rete.alpha import AlphaMemory
-from rete.condition import Condition, Production
-from rete.fact import Token, WME
+from rete.condition import Pattern, Production
+from rete.fact import Fact, Token
+
+if TYPE_CHECKING:
+    pass
 
 
 class LeftNode(Protocol):
@@ -24,89 +27,45 @@ class LeftNode(Protocol):
 
 
 class RightNode(Protocol):
-    """Structural protocol for nodes that receive right (WME) activations.
+    """Structural protocol for nodes that receive right (Fact) activations.
 
     :see: Doorenbos §2.4
     """
 
-    def right_activate(self, wme: WME) -> None: ...
-    def right_retract(self, wme: WME) -> None: ...
+    def right_activate(self, fact: Fact) -> None: ...
+    def right_retract(self, fact: Fact) -> None: ...
 
 
 @dataclass(frozen=True)
 class JoinTest:
-    """One variable-consistency constraint between the new WME and a token WME.
+    """One variable-consistency constraint between the new Fact and a token binding.
 
-    Passes iff ``getattr(wme, field_of_wme) == getattr(token.wmes[condition_index],
-    field_of_token_wme)``.
+    Passes iff ``getattr(fact.obj, attr_of_fact) == token.bindings[var_name]``.
 
     :see: Doorenbos §2.4
     """
 
-    field_of_wme: str
-    condition_index: int
-    field_of_token_wme: str
+    attr_of_fact: str
+    var_name: str
 
     @classmethod
     def extract(
         cls,
-        condition: Condition,
-        earlier_conditions: list[Condition],
+        pattern: Pattern,
+        earlier: list[Pattern],  # noqa: ARG003 — kept for network.py call-site compat
     ) -> list[JoinTest]:
-        """Extract variable-consistency tests for *condition*.
+        """Derive runtime join tests from the compile-time :class:`JoinSpec` list.
 
-        For each ``'?'``-prefixed variable in *condition*, find its bindings
-        in *earlier_conditions* and emit one :class:`JoinTest` per match.
+        ``earlier`` is accepted for call-site compatibility with :mod:`network`
+        (updated in Step 5) but is not used; ``pattern.join_tests`` already
+        encodes all cross-fact references declared at pattern-creation time.
 
-        :param condition: the condition being compiled
-        :param earlier_conditions: all preceding conditions in the LHS (ordered)
-        :returns: list of :class:`JoinTest`; empty if no shared variables
-        :see: Doorenbos §2.4
+        :param pattern: the pattern being compiled
+        :param earlier: preceding patterns in the LHS (unused)
+        :returns: one :class:`JoinTest` per :class:`JoinSpec` in *pattern*
+        :see: UPDATE_PLAN §Step 4
         """
-        tests: list[JoinTest] = []
-        for fname, val in [
-            ("id", condition.id_test),
-            ("attribute", condition.attribute_test),
-            ("value", condition.value_test),
-        ]:
-            if isinstance(val, str) and val.startswith("?"):
-                tests.extend(cls._tests_for_variable(val, fname, earlier_conditions))
-        return tests
-
-    @staticmethod
-    def _variable_binding(var: str, condition: Condition) -> str | None:
-        """Return the field name where *var* appears in *condition*, or ``None``.
-
-        :param var: a ``'?'``-prefixed variable name
-        :param condition: the condition to search
-        """
-        for fname, val in [
-            ("id", condition.id_test),
-            ("attribute", condition.attribute_test),
-            ("value", condition.value_test),
-        ]:
-            if val == var:
-                return fname
-        return None
-
-    @staticmethod
-    def _tests_for_variable(
-        var: str,
-        field_of_wme: str,
-        earlier: list[Condition],
-    ) -> list[JoinTest]:
-        """Emit one :class:`JoinTest` per earlier condition that binds *var*.
-
-        :param var: the variable to look up
-        :param field_of_wme: the field in the new WME where *var* appears
-        :param earlier: conditions preceding the current one in the LHS
-        """
-        tests: list[JoinTest] = []
-        for i, cond in enumerate(earlier):
-            f = JoinTest._variable_binding(var, cond)
-            if f is not None:
-                tests.append(JoinTest(field_of_wme, i, f))
-        return tests
+        return [cls(js.attr_of_fact, js.var_name) for js in pattern.join_tests]
 
 
 @dataclass
@@ -131,8 +90,8 @@ class BetaMemory:
         :param token: the new partial match
         """
         self.items.append(token)
-        if token.wmes:
-            token.wmes[-1].beta_tokens.append((token, self))
+        if token.facts:
+            token.facts[-1].beta_tokens.append((token, self))
         for s in self.successors:
             s.left_activate(token)
 
@@ -147,8 +106,8 @@ class BetaMemory:
         """
         if token not in self.items:
             return
-        if token.wmes:
-            token.wmes[-1].beta_tokens.remove((token, self))
+        if token.facts:
+            token.facts[-1].beta_tokens.remove((token, self))
         self.items.remove(token)
         for s in self.successors:
             s.left_retract(token)
@@ -175,21 +134,22 @@ class BaseJoinNode:
     """
 
     children: list[LeftNode] = field(default_factory=list, repr=False)
-    alpha_memory: AlphaMemory = field(default_factory=AlphaMemory)
+    # ponytail: stub default; callers always supply a real AlphaMemory.
+    alpha_memory: AlphaMemory = field(
+        default_factory=lambda: AlphaMemory(type_=object, predicate=lambda _: True)
+    )
     tests: list[JoinTest] = field(default_factory=list)
     right_unlinked: bool = field(default=False, repr=False)
     left_unlinked: bool = field(default=False, repr=False)
 
-    def _passes_tests(self, token: Token, wme: WME) -> bool:
-        """Return ``True`` iff *wme* is consistent with *token* for all join tests.
+    def _passes_tests(self, token: Token, fact: Fact) -> bool:
+        """Return ``True`` iff *fact* is consistent with *token* for all join tests.
 
-        :param token: existing partial match
-        :param wme: candidate WME to join or test
+        :param token: existing partial match (supplies named bindings)
+        :param fact: candidate Fact to join or test
         """
         for test in self.tests:
-            wme_val = getattr(wme, test.field_of_wme)
-            tok_val = getattr(token.wmes[test.condition_index], test.field_of_token_wme)
-            if wme_val != tok_val:
+            if getattr(fact.obj, test.attr_of_fact) != token.bindings[test.var_name]:
                 return False
         return True
 
@@ -207,21 +167,24 @@ class JoinNode(BaseJoinNode):
     """
 
     left_input: BetaMemory | DummyTopNode = field(default_factory=DummyTopNode)
+    # ponytail: Pattern | None default avoids dataclass inheritance ordering
+    # constraint; Step 5 (network.py) always provides a Pattern value.
+    pattern: Pattern | None = field(default=None)
 
-    def right_activate(self, wme: WME) -> None:
-        """Handle a new WME arriving in the alpha memory (right input).
+    def right_activate(self, fact: Fact) -> None:
+        """Handle a new Fact arriving in the alpha memory (right input).
 
         Re-links from beta memory if previously left-unlinked, then joins.
 
-        :param wme: the WME that just entered the alpha memory
+        :param fact: the Fact that just entered the alpha memory
         """
         if self.left_unlinked:
             if isinstance(self.left_input, BetaMemory):
                 self.left_input.successors.append(self)
             self.left_unlinked = False
         for token in self.left_input.items:
-            if self._passes_tests(token, wme):
-                self._extend_and_emit(token, wme)
+            if self._passes_tests(token, fact):
+                self._extend_and_emit(token, fact)
 
     def left_activate(self, token: Token) -> None:
         """Handle a new token arriving in the beta memory (left input).
@@ -233,18 +196,18 @@ class JoinNode(BaseJoinNode):
         if self.right_unlinked:
             self.alpha_memory.successors.append(self)
             self.right_unlinked = False
-        for wme in self.alpha_memory.items:
-            if self._passes_tests(token, wme):
-                self._extend_and_emit(token, wme)
+        for fact in self.alpha_memory.items:
+            if self._passes_tests(token, fact):
+                self._extend_and_emit(token, fact)
 
-    def right_retract(self, wme: WME) -> None:
-        """Handle removal of a WME from the alpha memory.
+    def right_retract(self, fact: Fact) -> None:
+        """Handle removal of a Fact from the alpha memory.
 
         Left-unlinks from beta memory when the alpha memory drains to zero.
 
-        :param wme: the WME being retracted
+        :param fact: the Fact being retracted
         """
-        for token, mem in list(wme.beta_tokens):
+        for token, mem in list(fact.beta_tokens):
             mem.left_retract(token)
         if len(self.alpha_memory.items) == 1 and not self.left_unlinked:
             if isinstance(self.left_input, BetaMemory):
@@ -258,7 +221,7 @@ class JoinNode(BaseJoinNode):
         """
         for child in self.children:
             for extended in list(child.items):
-                if extended.wmes[:-1] == token.wmes:
+                if extended.facts[:-1] == token.facts:
                     child.left_retract(extended)
 
     def left_retract(self, token: Token) -> None:
@@ -277,30 +240,47 @@ class JoinNode(BaseJoinNode):
         """Initialise *new_child* with all matches already held by this node.
 
         Called immediately after attaching a new downstream child so it
-        catches up with WMEs already in the network.
+        catches up with facts already in the network.
 
         :param new_child: a newly created :class:`BetaMemory` or :class:`PNode`
         :see: Doorenbos §2.6 ``update-new-node-with-matches-from-above``
         """
         for token in self.left_input.items:
-            for wme in self.alpha_memory.items:
-                if self._passes_tests(token, wme):
-                    new_child.left_activate(Token(wmes=token.wmes + (wme,)))
+            for fact in self.alpha_memory.items:
+                if self._passes_tests(token, fact):
+                    new_bindings = self._extract(fact)
+                    new_child.left_activate(
+                        Token(
+                            facts=token.facts + (fact,),
+                            bindings={**token.bindings, **new_bindings},
+                        )
+                    )
 
-    def _extend_and_emit(self, token: Token, wme: WME) -> None:
-        """Create an extended token and send it downstream.
+    def _extend_and_emit(self, token: Token, fact: Fact) -> None:
+        """Create an extended token, merging bindings, and send it downstream.
 
         :param token: existing partial match
-        :param wme: WME to append
+        :param fact: Fact to append
         """
-        extended = Token(wmes=token.wmes + (wme,))
+        new_bindings = self._extract(fact)
+        extended = Token(
+            facts=token.facts + (fact,),
+            bindings={**token.bindings, **new_bindings},
+        )
         for child in self.children:
             child.left_activate(extended)
+
+    def _extract(self, fact: Fact) -> dict:
+        """Return bindings extracted from *fact* via ``self.pattern``, or ``{}``.
+
+        :param fact: the matched fact
+        """
+        return self.pattern.extract_bindings(fact) if self.pattern else {}
 
 
 @dataclass
 class NegativeToken:
-    """Pairs a left-input token with its count of blocking right WMEs.
+    """Pairs a left-input token with its count of blocking right Facts.
 
     :see: Doorenbos §2.7
     """
@@ -313,8 +293,8 @@ class NegativeToken:
 class NegativeJoinNode(BaseJoinNode):
     """Negated join node: propagates a token downstream only while count is zero.
 
-    On WME add the count of matching tokens is incremented (possibly retracting
-    tokens); on WME remove the count is decremented (possibly re-asserting them).
+    On Fact add the count of matching tokens is incremented (possibly retracting
+    tokens); on Fact remove the count is decremented (possibly re-asserting them).
 
     :see: Forgy §2.3, Doorenbos §2.7
     """
@@ -339,25 +319,25 @@ class NegativeJoinNode(BaseJoinNode):
             for child in self.children:
                 child.left_activate(token)
 
-    def right_activate(self, wme: WME) -> None:
-        """Handle a new WME arriving in the alpha memory (right input).
+    def right_activate(self, fact: Fact) -> None:
+        """Handle a new Fact arriving in the alpha memory (right input).
 
-        :param wme: the WME that just entered the alpha memory
+        :param fact: the Fact that just entered the alpha memory
         """
         for neg_tok in self.items:
-            if self._passes_tests(neg_tok.token, wme):
+            if self._passes_tests(neg_tok.token, fact):
                 if neg_tok.count == 0:
                     for child in self.children:
                         child.left_retract(neg_tok.token)
                 neg_tok.count += 1
 
-    def right_retract(self, wme: WME) -> None:
-        """Handle removal of a WME from the alpha memory.
+    def right_retract(self, fact: Fact) -> None:
+        """Handle removal of a Fact from the alpha memory.
 
-        :param wme: the WME being retracted
+        :param fact: the Fact being retracted
         """
         for neg_tok in self.items:
-            if self._passes_tests(neg_tok.token, wme):
+            if self._passes_tests(neg_tok.token, fact):
                 neg_tok.count -= 1
                 if neg_tok.count == 0:
                     for child in self.children:
@@ -397,12 +377,12 @@ class NegativeJoinNode(BaseJoinNode):
                 child.left_activate(neg_tok.token)
 
     def _count_matches(self, token: Token) -> int:
-        """Count WMEs in the alpha memory that pass all join tests for *token*.
+        """Count Facts in the alpha memory that pass all join tests for *token*.
 
         :param token: the left-input token to test against
         """
         return sum(
-            1 for wme in self.alpha_memory.items if self._passes_tests(token, wme)
+            1 for fact in self.alpha_memory.items if self._passes_tests(token, fact)
         )
 
     def _initialize_from(self, tokens: Iterable[Token]) -> None:
@@ -448,17 +428,17 @@ class NccPartnerNode:
     def left_activate(self, token: Token) -> None:
         """Forward *token* to the NCC node, buffering if no owner token yet.
 
-        Registers in ``token.wmes[-1].beta_tokens`` so that
+        Registers in ``token.facts[-1].beta_tokens`` so that
         :meth:`JoinNode.right_retract` can reach this node when the
-        subnetwork WME is later removed.
+        subnetwork Fact is later removed.
 
         :param token: the result token from the subnetwork
         """
         self.items.append(token)
-        if token.wmes:
-            token.wmes[-1].beta_tokens.append((token, self))
-        owner_wmes = token.wmes[: self.ncc_node.owner_length]
-        ncc_tok = self._find_ncc_token(owner_wmes)
+        if token.facts:
+            token.facts[-1].beta_tokens.append((token, self))
+        owner_facts = token.facts[: self.ncc_node.owner_length]
+        ncc_tok = self._find_ncc_token(owner_facts)
         if ncc_tok:
             ncc_tok.results.append(token)
             if ncc_tok.count == 0:
@@ -474,10 +454,10 @@ class NccPartnerNode:
         :param token: the result token being retracted from the subnetwork
         """
         self.items.remove(token)
-        if token.wmes:
-            token.wmes[-1].beta_tokens.remove((token, self))
-        owner_wmes = token.wmes[: self.ncc_node.owner_length]
-        ncc_tok = self._find_ncc_token(owner_wmes)
+        if token.facts:
+            token.facts[-1].beta_tokens.remove((token, self))
+        owner_facts = token.facts[: self.ncc_node.owner_length]
+        ncc_tok = self._find_ncc_token(owner_facts)
         if ncc_tok:
             ncc_tok.results.remove(token)
             ncc_tok.count -= 1
@@ -497,13 +477,16 @@ class NccPartnerNode:
         """
         self.items.remove(token)
 
-    def _find_ncc_token(self, owner_wmes: tuple) -> NccToken | None:
-        """Return the :class:`NccToken` matching *owner_wmes*, or ``None``.
+    def _find_ncc_token(self, owner_facts: tuple) -> NccToken | None:
+        """Return the :class:`NccToken` matching *owner_facts*, or ``None``.
 
-        :param owner_wmes: prefix slice of the result token's WMEs
+        Fact identity (``eq=False``) means tuple equality compares by ``id``,
+        which is correct: facts flow through the network as the same objects.
+
+        :param owner_facts: prefix slice of the result token's facts
         """
         return next(
-            (nt for nt in self.ncc_node.items if nt.token.wmes == owner_wmes),
+            (nt for nt in self.ncc_node.items if nt.token.facts == owner_facts),
             None,
         )
 
@@ -564,11 +547,11 @@ class NccNode:
     def _drain_buffer(self, token: Token) -> list[Token]:
         """Partition ``new_result_buffer`` by *token*; return the matching results.
 
-        :param token: the left token whose owner WMEs to match against
+        :param token: the left token whose owner facts to match against
         """
         keep, drain = [], []
         for r in self.new_result_buffer:
-            if r.wmes[: self.owner_length] == token.wmes:
+            if r.facts[: self.owner_length] == token.facts:
                 drain.append(r)
             else:
                 keep.append(r)
@@ -628,8 +611,8 @@ class PNode:
         :param token: the complete match token arriving from the last join node
         """
         self.items.append(token)
-        if token.wmes:
-            token.wmes[-1].beta_tokens.append((token, self))
+        if token.facts:
+            token.facts[-1].beta_tokens.append((token, self))
         self.conflict_set.append(Instantiation(self.production, token))
 
     def left_retract(self, token: Token) -> None:
@@ -642,12 +625,10 @@ class PNode:
         """
         if token not in self.items:
             return
-        if token.wmes:
-            token.wmes[-1].beta_tokens.remove((token, self))
+        if token.facts:
+            token.facts[-1].beta_tokens.remove((token, self))
         self.items.remove(token)
         # Guard: instantiation may have been removed already by the engine loop.
         inst = Instantiation(self.production, token)
         if inst in self.conflict_set:
             self.conflict_set.remove(inst)
-
-
