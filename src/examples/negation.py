@@ -12,48 +12,91 @@ Expected single match: w8  →  x=B3
 """
 from __future__ import annotations
 
-from rete import Condition, Production, ReteNetwork, WME
+from dataclasses import dataclass
+
+from rete import Fact, Pattern, Production, ReteNetwork
+from rete.condition import JoinSpec
+
+
+@dataclass
+class On:
+    """Spatial relation: *upper* rests on *lower*."""
+
+    upper: str
+    lower: str
+
+
+@dataclass
+class Color:
+    """Colour property of a block."""
+
+    block: str
+    color: str
+
+
+def _on_table(obj: On) -> bool:
+    """Alpha test: block is on the table."""
+    return obj.lower == "table"
+
+
+def _is_blue(obj: Color) -> bool:
+    """Alpha test: block is blue."""
+    return obj.color == "blue"
+
+
+def _make_facts() -> list[Fact]:
+    """Return working-memory facts w1–w9 (Doorenbos §2.1)."""
+    return [
+        Fact(On("B1", "B2")),      # w1
+        Fact(On("B1", "B3")),      # w2
+        Fact(Color("B1", "red")),  # w3
+        Fact(On("B2", "table")),   # w4
+        Fact(Color("B2", "blue")), # w5  (was w6 in blocks_world; reordered for clarity)
+        Fact(Color("B3", "red")),  # w6
+        Fact(On("B3", "table")),   # w7
+    ]
+
+
+def _build_network() -> ReteNetwork:
+    """Compile the negation production into a fresh network."""
+    net = ReteNetwork()
+    net.add_production(Production(
+        lhs=[
+            Pattern(On, alpha_tests=(_on_table,), bindings=(("$x", "upper"),)),
+            Pattern(Color, alpha_tests=(_is_blue,),
+                    join_tests=(JoinSpec("block", "$x"),),
+                    negated=True),
+        ],
+        rhs=lambda t: None,
+    ))
+    return net
+
+
+def _run() -> list[str]:
+    """Return ``["B3"]`` for the matching block — used by tests."""
+    net = _build_network()
+    for f in _make_facts():
+        net.add_fact(f)
+    return [i.token.bindings["$x"] for i in net.conflict_set]
 
 
 def main() -> None:
-    net = ReteNetwork()
+    """Run the example with printed output and embedded assertions."""
+    net = _build_network()
+    facts = _make_facts()
 
-    def rhs(token):
-        # Negated conditions do not contribute a WME to the token.
-        x = token.wmes[0].id
-        print(f"  fired: x={x} is on the table and not blue")
-
-    net.add_production(Production(
-        lhs=[
-            Condition("?x", "on",    "table"),              # C1  positive
-            Condition("?x", "color", "blue", negated=True), # -C2 negated
-        ],
-        rhs=rhs,
-    ))
-
-    wmes = [
-        WME("B1", "on",      "B2"),    # w1
-        WME("B1", "on",      "B3"),    # w2
-        WME("B1", "color",   "red"),   # w3
-        WME("B2", "on",      "table"), # w4
-        WME("B2", "left-of", "B3"),    # w5
-        WME("B2", "color",   "blue"),  # w6
-        WME("B3", "left-of", "B4"),    # w7
-        WME("B3", "on",      "table"), # w8
-        WME("B3", "color",   "red"),   # w9
-    ]
-
-    print("Adding WMEs w1–w9:")
-    for i, wme in enumerate(wmes, 1):
-        print(f"  w{i}: ({wme.id} ^{wme.attribute} {wme.value})")
-        net.add_wme(wme)
+    print("Adding facts:")
+    for f in facts:
+        print(f"  {f.obj}")
+        net.add_fact(f)
 
     print(f"\nConflict set: {len(net.conflict_set)} instantiation(s)")
     for inst in net.conflict_set:
-        rhs(inst.token)
+        x = inst.token.bindings["$x"]
+        print(f"  fired: x={x} is on the table and not blue")
 
     assert len(net.conflict_set) == 1
-    assert net.conflict_set[0].token.wmes[0].id == "B3"
+    assert net.conflict_set[0].token.bindings["$x"] == "B3"
 
 
 if __name__ == "__main__":

@@ -9,8 +9,8 @@ from typing import Callable
 
 from rete.beta import Instantiation, PNode
 from rete.condition import Production
+from rete.fact import Fact
 from rete.network import ReteNetwork
-from rete.wme import WME
 
 
 @dataclass
@@ -48,19 +48,31 @@ class InferenceEngine:
     # Passthrough delegates
     # ------------------------------------------------------------------
 
-    def add_wme(self, wme: WME) -> None:
-        """Assert *wme* into the network.
+    def add_fact(self, fact: Fact) -> None:
+        """Assert *fact* into the network.
 
-        :param wme: the WME to add
+        :param fact: the :class:`Fact` to add
         """
-        self.network.add_wme(wme)
+        self.network.add_fact(fact)
 
-    def remove_wme(self, wme: WME) -> None:
-        """Retract *wme* from the network.
+    def remove_fact(self, fact: Fact) -> None:
+        """Retract *fact* from the network.
 
-        :param wme: the WME to remove
+        :param fact: the :class:`Fact` to remove
         """
-        self.network.remove_wme(wme)
+        self.network.remove_fact(fact)
+
+    def update_fact(self, fact: Fact) -> None:
+        """Retract and re-assert *fact* after its wrapped object has been mutated.
+
+        Equivalent to Drools ``modify``.  Mutate ``fact.obj`` attributes in
+        place before calling; do not replace ``fact.obj`` itself, as that
+        breaks the back-pointer chain.
+
+        :param fact: the :class:`Fact` whose ``obj`` has been mutated in place
+        """
+        self.remove_fact(fact)
+        self.add_fact(fact)
 
     def add_production(self, production: Production) -> PNode:
         """Compile *production* into the network.

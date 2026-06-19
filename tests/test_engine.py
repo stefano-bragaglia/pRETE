@@ -2,10 +2,61 @@
 
 :see: Forgy §1.1
 """
+from dataclasses import dataclass
+
 from rete.beta import Instantiation, PNode
-from rete.condition import Condition, Production
+from rete.condition import Pattern, Production
 from rete.engine import InferenceEngine
-from rete.wme import Token, WME
+from rete.fact import Fact, Token
+
+
+# ---------------------------------------------------------------------------
+# Test dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Color:
+    block: str
+    color: str
+
+
+@dataclass
+class Size:
+    block: str
+    size: str
+
+
+@dataclass
+class Counter:
+    value: int
+
+
+@dataclass
+class LoanApp:
+    applicant: str
+    approved: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Module-level alpha-test functions (stable ids for alpha-memory sharing)
+# ---------------------------------------------------------------------------
+
+
+def _is_red(obj: Color) -> bool:
+    return obj.color == "red"
+
+
+def _is_large(obj: Size) -> bool:
+    return obj.size == "large"
+
+
+def _is_approved(obj: LoanApp) -> bool:
+    return obj.approved
+
+
+def _is_denied(obj: LoanApp) -> bool:
+    return not obj.approved
 
 
 # ---------------------------------------------------------------------------
@@ -13,7 +64,7 @@ from rete.wme import Token, WME
 # ---------------------------------------------------------------------------
 
 
-def _prod(lhs: list[Condition], rhs=None) -> Production:
+def _prod(lhs: list, rhs=None) -> Production:
     return Production(lhs=lhs, rhs=rhs or (lambda t: None))
 
 
@@ -31,10 +82,10 @@ def test_run_fires_single_instantiation():
     fired = []
     engine = InferenceEngine()
     engine.add_production(Production(
-        lhs=[Condition("b1", "color", "red")],
+        lhs=[Pattern(Color, alpha_tests=(_is_red,))],
         rhs=lambda t: fired.append(t),
     ))
-    engine.add_wme(WME("b1", "color", "red"))
+    engine.add_fact(Fact(Color("b1", "red")))
     steps = engine.run()
     assert steps == 1
     assert len(fired) == 1
@@ -42,22 +93,22 @@ def test_run_fires_single_instantiation():
 
 
 def test_run_forward_chaining():
-    """Rule A's RHS adds a WME that triggers rule B."""
+    """Rule A's RHS adds a Fact that triggers rule B."""
     engine = InferenceEngine()
     log = []
 
     def rhs_a(token: Token) -> None:
-        engine.add_wme(WME("b2", "size", "large"))
+        engine.add_fact(Fact(Size("b2", "large")))
 
     engine.add_production(Production(
-        lhs=[Condition("b1", "color", "red")],
+        lhs=[Pattern(Color, alpha_tests=(_is_red,))],
         rhs=rhs_a,
     ))
     engine.add_production(Production(
-        lhs=[Condition("b2", "size", "large")],
+        lhs=[Pattern(Size, alpha_tests=(_is_large,))],
         rhs=lambda t: log.append("B"),
     ))
-    engine.add_wme(WME("b1", "color", "red"))
+    engine.add_fact(Fact(Color("b1", "red")))
     steps = engine.run()
     assert steps == 2
     assert log == ["B"]
@@ -71,10 +122,10 @@ def test_run_max_steps():
 
     def rhs(t: Token) -> None:
         log.append(1)
-        engine.add_wme(WME("x", "y", str(len(log))))  # keeps adding new matches
+        engine.add_fact(Fact(Counter(len(log))))  # each Fact is a distinct identity
 
-    engine.add_production(Production(lhs=[Condition("x", "y", "?v")], rhs=rhs))
-    engine.add_wme(WME("x", "y", "seed"))
+    engine.add_production(Production(lhs=[Pattern(Counter)], rhs=rhs))
+    engine.add_fact(Fact(Counter(0)))  # seed
     steps = engine.run(max_steps=3)
     assert steps == 3
 
@@ -83,12 +134,11 @@ def test_run_returns_step_count():
     engine = InferenceEngine()
     fired = []
     engine.add_production(Production(
-        lhs=[Condition("a", "b", "c")],
+        lhs=[Pattern(Color)],
         rhs=lambda t: fired.append(1),
     ))
-    engine.add_wme(WME("a", "b", "c"))
-    engine.add_wme(WME("a", "b", "c"))  # second WME, second match on same condition
-    # Two distinct WMEs both match → two instantiations
+    engine.add_fact(Fact(Color("a", "b")))
+    engine.add_fact(Fact(Color("a", "b")))  # distinct identity → second match
     assert engine.run() == 2
 
 
@@ -97,12 +147,12 @@ def test_run_does_not_refire_same_instantiation():
     engine = InferenceEngine()
     fired = []
     engine.add_production(Production(
-        lhs=[Condition("b1", "color", "red")],
+        lhs=[Pattern(Color, alpha_tests=(_is_red,))],
         rhs=lambda t: fired.append(1),
     ))
-    engine.add_wme(WME("b1", "color", "red"))
+    engine.add_fact(Fact(Color("b1", "red")))
     engine.run()
-    assert len(fired) == 1  # fired exactly once
+    assert len(fired) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +182,6 @@ def test_custom_strategy():
     """Engine accepts any callable as strategy."""
     chosen = Instantiation(production=_prod([]), token=Token())
     engine = InferenceEngine(strategy=lambda cs: chosen)
-    # We can set strategy; engine wraps it without error.
     assert engine.strategy([chosen]) is chosen
 
 
@@ -141,30 +190,28 @@ def test_custom_strategy():
 # ---------------------------------------------------------------------------
 
 
-def test_delegate_add_wme():
+def test_delegate_add_fact():
     engine = InferenceEngine()
-    wme = WME("a", "b", "c")
-    engine.add_wme(wme)
-    # No production → nothing to assert, but no error either.
+    engine.add_fact(Fact(Color("a", "b")))  # no error
 
 
-def test_delegate_remove_wme():
+def test_delegate_remove_fact():
     engine = InferenceEngine()
-    wme = WME("a", "b", "c")
-    engine.add_wme(wme)
-    engine.remove_wme(wme)
+    f = Fact(Color("a", "b"))
+    engine.add_fact(f)
+    engine.remove_fact(f)  # no error
 
 
 def test_delegate_add_production_returns_pnode():
     engine = InferenceEngine()
-    pn = engine.add_production(_prod([Condition("a", "b", "c")]))
+    pn = engine.add_production(_prod([Pattern(Color)]))
     assert isinstance(pn, PNode)
 
 
 def test_delegate_remove_production():
     engine = InferenceEngine()
-    pn = engine.add_production(_prod([Condition("a", "b", "c")]))
-    engine.add_wme(WME("a", "b", "c"))
+    pn = engine.add_production(_prod([Pattern(Color, alpha_tests=(_is_red,))]))
+    engine.add_fact(Fact(Color("a", "red")))
     engine.remove_production(pn)
     assert engine.network.conflict_set == []
 
@@ -175,14 +222,112 @@ def test_delegate_remove_production():
 
 
 def test_instantiation_equality_distinct_tokens():
-    """Two Instantiations with identical WME tuples compare equal — verify remove
-    picks the right one and does not raise."""
-    wme = WME("x", "y", "z")
+    """Two Instantiations with identical Fact tuples compare equal; remove picks
+    the first and leaves the second."""
+    fact = Fact(Color("x", "y"))
     p = _prod([])
-    t1 = Token(wmes=(wme,))
-    t2 = Token(wmes=(wme,))  # distinct object, same contents
+    t1 = Token(facts=(fact,))
+    t2 = Token(facts=(fact,))  # distinct Token object, same contents
     i1 = Instantiation(production=p, token=t1)
     i2 = Instantiation(production=p, token=t2)
     cs = [i1, i2]
     cs.remove(i1)
     assert i2 in cs
+
+
+# ---------------------------------------------------------------------------
+# update_fact
+# ---------------------------------------------------------------------------
+
+
+def test_update_fact_new_match_after_mutation():
+    """Mutate obj so it now matches a rule; update_fact makes it visible."""
+    engine = InferenceEngine()
+    denied = []
+    engine.add_production(Production(
+        lhs=[Pattern(LoanApp, alpha_tests=(_is_denied,))],
+        rhs=lambda t: denied.append(t.facts[-1].obj.applicant),
+    ))
+    app = Fact(LoanApp("Alice", True))
+    engine.add_fact(app)
+    engine.run()
+    assert denied == []
+
+    app.obj.approved = False
+    engine.update_fact(app)
+    engine.run()
+    assert denied == ["Alice"]
+
+
+def test_update_fact_stale_match_removed():
+    """Mutate obj so it no longer matches; old match is gone after update_fact."""
+    engine = InferenceEngine()
+    approved = []
+    engine.add_production(Production(
+        lhs=[Pattern(LoanApp, alpha_tests=(_is_approved,))],
+        rhs=lambda t: approved.append(t.facts[-1].obj.applicant),
+    ))
+    app = Fact(LoanApp("Bob", True))
+    engine.add_fact(app)
+    engine.run()
+    assert approved == ["Bob"]
+
+    app.obj.approved = False
+    engine.update_fact(app)
+    engine.run()
+    assert len(approved) == 1  # no new firing after mutation
+
+
+def test_update_fact_called_from_rhs():
+    """update_fact inside RHS: approved rule fires once, then denied rule fires
+    once; no double-fire, no missing fire, no infinite loop."""
+    engine = InferenceEngine()
+    fired = []
+
+    def approve_to_deny(token: Token) -> None:
+        fact = token.facts[-1]
+        fact.obj.approved = False
+        engine.update_fact(fact)
+
+    engine.add_production(Production(
+        lhs=[Pattern(LoanApp, alpha_tests=(_is_approved,))],
+        rhs=approve_to_deny,
+    ))
+    engine.add_production(Production(
+        lhs=[Pattern(LoanApp, alpha_tests=(_is_denied,))],
+        rhs=lambda t: fired.append(1),
+    ))
+    app = Fact(LoanApp("Carol", True))
+    engine.add_fact(app)
+    engine.run(max_steps=10)
+    assert len(fired) == 1
+
+
+def test_update_fact_preserves_object_identity():
+    """The same Fact object ends up in the token after update_fact."""
+    engine = InferenceEngine()
+    seen = []
+    engine.add_production(Production(
+        lhs=[Pattern(LoanApp, alpha_tests=(_is_approved,))],
+        rhs=lambda t: seen.append(t.facts[-1]),
+    ))
+    app = Fact(LoanApp("Dave", True))
+    engine.add_fact(app)
+    engine.update_fact(app)
+    engine.run()
+    assert len(seen) == 1
+    assert seen[0] is app
+
+
+def test_token_bindings_accessible_in_rhs():
+    """token.bindings populated by pattern.bindings is accessible in RHS."""
+    engine = InferenceEngine()
+    captured = []
+    p = Pattern(Color, bindings=(("$color", "color"),))
+    engine.add_production(Production(
+        lhs=[p],
+        rhs=lambda t: captured.append(t.bindings["$color"]),
+    ))
+    engine.add_fact(Fact(Color("b1", "red")))
+    engine.run()
+    assert captured == ["red"]

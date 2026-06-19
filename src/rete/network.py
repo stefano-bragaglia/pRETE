@@ -18,8 +18,8 @@ from rete.beta import (
     NegativeJoinNode,
     PNode,
 )
-from rete.condition import Condition, NccGroup, Production
-from rete.wme import WME
+from rete.condition import NccGroup, Pattern, Production
+from rete.fact import Fact
 
 
 @dataclass
@@ -36,30 +36,30 @@ class ReteNetwork:
     dummy_top: DummyTopNode = field(default_factory=DummyTopNode)
     conflict_set: list[Instantiation] = field(default_factory=list)
 
-    def add_wme(self, wme: WME) -> None:
-        """Feed *wme* into the alpha network, triggering all matching join nodes.
+    def add_fact(self, fact: Fact) -> None:
+        """Feed *fact* into the alpha network, triggering all matching join nodes.
 
-        :param wme: the WME to assert
+        :param fact: the Fact to assert
         :see: Doorenbos §2.5 ``add-wme``
         """
-        self.root.activate(wme)
+        self.root.activate(fact)
 
-    def remove_wme(self, wme: WME) -> None:
-        """Retract *wme* from all alpha memories and propagate through the network.
+    def remove_fact(self, fact: Fact) -> None:
+        """Retract *fact* from all alpha memories and propagate through the network.
 
-        :param wme: the WME to retract
+        :param fact: the Fact to retract
         :see: Doorenbos §2.5 ``remove-wme``
         """
-        self.root.deactivate(wme)
-        for am in list(wme.alpha_memories):
-            am.deactivate(wme)
+        self.root.deactivate(fact)
+        for am in list(fact.alpha_memories):
+            am.deactivate(fact)
 
     def add_production(self, production: Production) -> PNode:
         """Compile *production* into the network and return its terminal PNode.
 
-        Shares existing alpha nodes, alpha memories, join nodes, and beta
-        memories wherever tests are identical.  Initialises any newly created
-        nodes with existing WME matches via :meth:`JoinNode.update_child`.
+        Shares existing alpha memories, join nodes, and beta memories wherever
+        pattern keys are identical.  Initialises any newly created nodes with
+        existing Fact matches via :meth:`JoinNode.update_child`.
 
         :param production: the production to add
         :returns: the newly created :class:`PNode`
@@ -100,16 +100,16 @@ class ReteNetwork:
     # ------------------------------------------------------------------
 
     def _build_join_chain(
-        self, lhs: list[Condition | NccGroup]
+        self, lhs: list[Pattern | NccGroup]
     ) -> JoinNode | NegativeJoinNode | NccNode:
         """Build or share the join-node chain for *lhs*.
 
-        :param lhs: ordered list of conditions / NCC groups from the production LHS
+        :param lhs: ordered list of patterns / NCC groups from the production LHS
         :returns: the last node in the compiled chain
         :see: Doorenbos §2.6 ``build-or-share-network-for-conditions``, §2.8
         """
         left: BetaMemory | DummyTopNode = self.dummy_top
-        earlier: list[Condition] = []
+        earlier: list[Pattern] = []
         last = None
         for i, item in enumerate(lhs):
             if isinstance(item, NccGroup):
@@ -123,26 +123,26 @@ class ReteNetwork:
 
     def _process_condition(
         self,
-        cond: Condition,
+        pattern: Pattern,
         left: BetaMemory | DummyTopNode,
-        earlier: list[Condition],
+        earlier: list[Pattern],
     ) -> JoinNode | NegativeJoinNode:
-        """Compile one :class:`Condition` into a join node, sharing if possible.
+        """Compile one :class:`Pattern` into a join node, sharing if possible.
 
-        :param cond: the condition to compile
+        :param pattern: the pattern to compile
         :param left: current left input
-        :param earlier: conditions already compiled (for variable tests)
+        :param earlier: patterns already compiled (for JoinTest derivation)
         """
-        am = self.root.build_or_share_alpha_memory(cond)
-        tests = JoinTest.extract(cond, earlier)
-        if cond.negated:
+        am = self.root.build_or_share_alpha_memory(pattern)
+        tests = JoinTest.extract(pattern, earlier)
+        if pattern.negated:
             return self._build_or_share_negative_join_node(left, am, tests)
-        return self._build_or_share_join_node(left, am, tests)
+        return self._build_or_share_join_node(left, am, tests, pattern)
 
     def _build_ncc(
         self,
         left: BetaMemory | DummyTopNode,
-        earlier: list[Condition],
+        earlier: list[Pattern],
         group: NccGroup,
     ) -> NccNode:
         """Build an NCC node and its subnetwork for *group*.
@@ -152,7 +152,7 @@ class ReteNetwork:
         processes left tokens, giving correct counts from the start.
 
         :param left: current left input on the main chain
-        :param earlier: conditions already compiled on the main chain
+        :param earlier: patterns already compiled on the main chain
         :param group: the NCC group to compile
         :see: Doorenbos §2.8
         """
@@ -172,24 +172,24 @@ class ReteNetwork:
     def _build_ncc_subnetwork(
         self,
         left: BetaMemory | DummyTopNode,
-        earlier: list[Condition],
+        earlier: list[Pattern],
         group: NccGroup,
     ) -> JoinNode:
         """Build the positive join-node chain for the NCC *group*'s subnetwork.
 
         :param left: the same left input as the NCC node (parallel branch)
-        :param earlier: conditions from the main chain (variables accessible in group)
-        :param group: the NCC group supplying the subnetwork conditions
+        :param earlier: patterns from the main chain (variables accessible in group)
+        :param group: the NCC group supplying the subnetwork patterns
         :returns: the last join node in the subnetwork
         """
         sub_left: BetaMemory | DummyTopNode = left
         sub_earlier = list(earlier)
         sub_last: JoinNode | None = None
-        for i, cond in enumerate(group.conditions):
-            am = self.root.build_or_share_alpha_memory(cond)
-            tests = JoinTest.extract(cond, sub_earlier)
-            sub_last = self._build_or_share_join_node(sub_left, am, tests)
-            sub_earlier.append(cond)
+        for i, pattern in enumerate(group.conditions):
+            am = self.root.build_or_share_alpha_memory(pattern)
+            tests = JoinTest.extract(pattern, sub_earlier)
+            sub_last = self._build_or_share_join_node(sub_left, am, tests, pattern)
+            sub_earlier.append(pattern)
             if i < len(group.conditions) - 1:
                 sub_left = self._build_or_share_beta_memory(sub_last)
         return sub_last
@@ -199,24 +199,27 @@ class ReteNetwork:
         left: BetaMemory | DummyTopNode,
         am: AlphaMemory,
         tests: list[JoinTest],
+        pattern: Pattern,
     ) -> JoinNode:
         """Return a matching existing join node or create and wire a new one.
 
-        Sharing key: ``left`` by identity, ``tests`` by value.
+        Sharing key: ``left`` by identity, ``tests`` by value,
+        ``pattern.alpha_key()`` and ``pattern.bindings`` by value.
+        The bindings component prevents aliasing two patterns that share an
+        alpha memory (same type + alpha_tests) but extract different variables.
 
         :param left: the left input — a :class:`BetaMemory` or :class:`DummyTopNode`
-        :param am: the alpha memory supplying WMEs (right input)
+        :param am: the alpha memory supplying Facts (right input)
         :param tests: variable-consistency tests for this join
+        :param pattern: the :class:`Pattern` being compiled (supplies bindings)
         :see: Doorenbos §2.6 ``build-or-share-join-node``
         """
         for jn in am.successors:
-            if (
-                isinstance(jn, JoinNode)
-                and jn.left_input is left
-                and jn.tests == tests
-            ):
+            if self._jn_matches(jn, left, tests, pattern):
                 return jn
-        jn = JoinNode(children=[], alpha_memory=am, left_input=left, tests=tests)
+        jn = JoinNode(
+            children=[], alpha_memory=am, left_input=left, tests=tests, pattern=pattern
+        )
         self._init_join_links(jn, left, am)
         return jn
 
@@ -229,9 +232,11 @@ class ReteNetwork:
         """Return a matching existing NJN or create and wire a new one.
 
         Sharing key: ``left`` by identity, ``tests`` by value.
+        NJN has no ``pattern`` field — negated conditions only block, they
+        never contribute variable bindings to the token.
 
         :param left: the left input — a :class:`BetaMemory` or :class:`DummyTopNode`
-        :param am: the alpha memory supplying WMEs (right input)
+        :param am: the alpha memory supplying Facts (right input)
         :param tests: variable-consistency tests for this join
         :see: Doorenbos §2.7
         """
@@ -297,6 +302,45 @@ class ReteNetwork:
             am.successors.append(njn)
             if isinstance(left, BetaMemory):
                 left.successors.append(njn)
+
+    @staticmethod
+    def _join_key(
+        left: BetaMemory | DummyTopNode,
+        tests: list[JoinTest],
+        pattern: Pattern,
+    ) -> tuple:
+        """Return a hashable sharing key for a join node.
+
+        Uses ``id(left)`` for identity, ``pattern.alpha_key()`` for the alpha
+        memory slot, and ``pattern.bindings`` to distinguish patterns that share
+        an alpha memory but extract different variables.
+
+        :param left: left input node
+        :param tests: join tests
+        :param pattern: the pattern being compiled
+        """
+        return (id(left), tests, pattern.alpha_key(), pattern.bindings)
+
+    @staticmethod
+    def _jn_matches(
+        jn: object,
+        left: BetaMemory | DummyTopNode,
+        tests: list[JoinTest],
+        pattern: Pattern,
+    ) -> bool:
+        """Return ``True`` iff *jn* is a shareable :class:`JoinNode` for *pattern*.
+
+        :param jn: candidate node from ``am.successors``
+        :param left: expected left input
+        :param tests: expected join tests
+        :param pattern: the pattern being compiled
+        """
+        return (
+            isinstance(jn, JoinNode)
+            and jn.pattern is not None
+            and ReteNetwork._join_key(jn.left_input, jn.tests, jn.pattern)
+            == ReteNetwork._join_key(left, tests, pattern)
+        )
 
     @staticmethod
     def _njn_matches(
