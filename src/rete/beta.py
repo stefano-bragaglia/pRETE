@@ -573,6 +573,9 @@ class PNode:
         if token.wmes:
             token.wmes[-1].beta_tokens.remove((token, self))
         self.items.remove(token)
-        self.conflict_set.remove(Instantiation(self.production, token))
+        # Guard: instantiation may have been removed already by the engine loop.
+        inst = Instantiation(self.production, token)
+        if inst in self.conflict_set:
+            self.conflict_set.remove(inst)
 
 
