@@ -17,18 +17,21 @@ from rete.beta import (
     PNode,
     RightNode,
 )
-from rete.condition import WILDCARD, Condition, NccGroup, Production
+from rete.condition import JoinSpec, NccGroup, Pattern, Production
+from rete.engine import InferenceEngine
+from rete.fact import Fact, Token
 from rete.network import ReteNetwork
-from rete.fact import Token, WME
 
 __all__ = [
     "AlphaMemory",
     "BaseJoinNode",
     "BetaMemory",
-    "Condition",
     "DummyTopNode",
+    "Fact",
+    "InferenceEngine",
     "Instantiation",
     "JoinNode",
+    "JoinSpec",
     "JoinTest",
     "LeftNode",
     "NccGroup",
@@ -37,12 +40,11 @@ __all__ = [
     "NccToken",
     "NegativeJoinNode",
     "NegativeToken",
+    "Pattern",
     "PNode",
     "Production",
-    "RightNode",
     "ReteNetwork",
+    "RightNode",
     "RootNode",
     "Token",
-    "WILDCARD",
-    "WME",
 ]
