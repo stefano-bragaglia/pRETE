@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from rete.alpha import AlphaMemory
-from rete.condition import Condition
+from rete.condition import Condition, Production
 from rete.wme import Token, WME
 
 
@@ -220,5 +220,49 @@ class JoinNode:
         :param wme: the WME being retracted
         """
         return bool(token.wmes) and token.wmes[-1] is wme
+
+
+@dataclass
+class Instantiation:
+    """A production–token pair representing one full match in the conflict set.
+
+    :see: Doorenbos §2.1
+    """
+
+    production: Production
+    token: Token
+
+
+@dataclass
+class PNode:
+    """Terminal node: records full matches in the shared conflict set.
+
+    Sits at the end of a join chain (Doorenbos §2.4).  A token arriving via
+    ``left_activate`` represents a complete production match; it is stored in
+    ``items`` (so ``JoinNode`` retract scans can reach it) and added to the
+    shared ``conflict_set`` as an :class:`Instantiation`.
+
+    :see: Doorenbos §2.4, §2.6
+    """
+
+    production: Production
+    conflict_set: list[Instantiation]
+    items: list[Token] = field(default_factory=list)
+
+    def left_activate(self, token: Token) -> None:
+        """Record a full match.
+
+        :param token: the complete match token arriving from the last join node
+        """
+        self.items.append(token)
+        self.conflict_set.append(Instantiation(self.production, token))
+
+    def left_retract(self, token: Token) -> None:
+        """Remove a previously recorded match.
+
+        :param token: the complete match token being retracted
+        """
+        self.items.remove(token)
+        self.conflict_set.remove(Instantiation(self.production, token))
 
 
