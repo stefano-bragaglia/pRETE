@@ -1,15 +1,17 @@
-"""Unit tests for beta.py — JoinTest, BetaMemory, DummyTopNode, JoinNode.
+"""Unit tests for beta.py — JoinTest, BetaMemory, DummyTopNode, JoinNode, PNode.
 
-:see: Doorenbos §2.4
+:see: Doorenbos §2.4, §2.6
 """
 from rete.alpha import AlphaMemory
 from rete.beta import (
     BetaMemory,
     DummyTopNode,
+    Instantiation,
     JoinNode,
     JoinTest,
+    PNode,
 )
-from rete.condition import WILDCARD, Condition
+from rete.condition import WILDCARD, Condition, Production
 from rete.wme import Token, WME
 
 
@@ -342,6 +344,106 @@ def test_two_join_nodes_chain():
 
     assert len(bm2.items) == 1
     assert bm2.items[0].wmes == (w1, w2)
+
+
+# ---------------------------------------------------------------------------
+# PNode
+# ---------------------------------------------------------------------------
+
+
+def _make_production() -> Production:
+    return Production(lhs=[], rhs=lambda t: None)
+
+
+def test_pnode_left_activate_stores_token_in_items():
+    pn = PNode(production=_make_production(), conflict_set=[])
+    t = Token(wmes=(WME("b1", "color", "red"),))
+    pn.left_activate(t)
+    assert t in pn.items
+
+
+def test_pnode_left_activate_adds_instantiation_to_conflict_set():
+    p = _make_production()
+    cs: list[Instantiation] = []
+    pn = PNode(production=p, conflict_set=cs)
+    t = Token(wmes=(WME("b1", "color", "red"),))
+    pn.left_activate(t)
+    assert cs == [Instantiation(p, t)]
+
+
+def test_pnode_left_retract_removes_token_from_items():
+    pn = PNode(production=_make_production(), conflict_set=[])
+    t = Token(wmes=(WME("b1", "color", "red"),))
+    pn.left_activate(t)
+    pn.left_retract(t)
+    assert t not in pn.items
+
+
+def test_pnode_left_retract_removes_instantiation_from_conflict_set():
+    p = _make_production()
+    cs: list[Instantiation] = []
+    pn = PNode(production=p, conflict_set=cs)
+    t = Token(wmes=(WME("b1", "color", "red"),))
+    pn.left_activate(t)
+    pn.left_retract(t)
+    assert cs == []
+
+
+def test_pnode_multiple_tokens_coexist():
+    p = _make_production()
+    cs: list[Instantiation] = []
+    pn = PNode(production=p, conflict_set=cs)
+    t1 = Token(wmes=(WME("b1", "color", "red"),))
+    t2 = Token(wmes=(WME("b2", "color", "blue"),))
+    pn.left_activate(t1)
+    pn.left_activate(t2)
+    assert len(pn.items) == 2
+    assert len(cs) == 2
+
+
+def test_pnode_left_retract_removes_only_target():
+    p = _make_production()
+    cs: list[Instantiation] = []
+    pn = PNode(production=p, conflict_set=cs)
+    t1 = Token(wmes=(WME("b1", "color", "red"),))
+    t2 = Token(wmes=(WME("b2", "color", "blue"),))
+    pn.left_activate(t1)
+    pn.left_activate(t2)
+    pn.left_retract(t1)
+    assert t1 not in pn.items
+    assert t2 in pn.items
+    assert cs == [Instantiation(p, t2)]
+
+
+def test_join_node_with_pnode_child_right_activate():
+    p = _make_production()
+    cs: list[Instantiation] = []
+    pn = PNode(production=p, conflict_set=cs)
+    am = AlphaMemory()
+    jn = JoinNode(children=[pn], alpha_memory=am, beta_memory=DummyTopNode(), tests=[])
+    w = WME("b1", "color", "red")
+    jn.right_activate(w)
+    assert len(cs) == 1
+    assert cs[0].token.wmes == (w,)
+    assert cs[0].production is p
+
+
+def test_join_node_with_pnode_child_right_retract():
+    p = _make_production()
+    cs: list[Instantiation] = []
+    pn = PNode(production=p, conflict_set=cs)
+    am = AlphaMemory()
+    jn = JoinNode(children=[pn], alpha_memory=am, beta_memory=DummyTopNode(), tests=[])
+    w = WME("b1", "color", "red")
+    jn.right_activate(w)
+    jn.right_retract(w)
+    assert cs == []
+    assert pn.items == []
+
+
+# ---------------------------------------------------------------------------
+# Chain integration
+# ---------------------------------------------------------------------------
 
 
 def test_chain_retract_wme_cascades():
