@@ -30,6 +30,7 @@ net = ReteNetwork()
 ## Dev
 
 ```bash
+xenon --max-absolute A --max-modules A --max-average A src/ tests/
 ruff check src/ tests/
 pytest --cov
 ```
