@@ -19,7 +19,7 @@ from rete.beta import (
 )
 from rete.condition import WILDCARD, Condition, NccGroup, Production
 from rete.network import ReteNetwork
-from rete.wme import Token, WME
+from rete.fact import Token, WME
 
 __all__ = [
     "AlphaMemory",

@@ -11,7 +11,7 @@ from rete.beta import (
 from rete.condition import Condition, Production
 from rete.engine import InferenceEngine
 from rete.network import ReteNetwork
-from rete.wme import Token, WME
+from rete.fact import Token, WME
 
 
 # ---------------------------------------------------------------------------

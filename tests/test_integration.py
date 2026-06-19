@@ -4,7 +4,7 @@
 """
 from rete.condition import Condition, NccGroup, Production
 from rete.engine import InferenceEngine
-from rete.wme import Token, WME
+from rete.fact import Token, WME
 
 
 # ---------------------------------------------------------------------------

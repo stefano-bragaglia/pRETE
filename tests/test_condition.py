@@ -1,5 +1,5 @@
 from rete.condition import WILDCARD, Condition, Production
-from rete.wme import Token, WME
+from rete.fact import Token, WME
 
 
 def test_constant_matches_exact():

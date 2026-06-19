@@ -8,7 +8,7 @@ from rete.alpha import (
     RootNode,
 )
 from rete.condition import WILDCARD, Condition
-from rete.wme import WME
+from rete.fact import WME
 
 
 # ---------------------------------------------------------------------------

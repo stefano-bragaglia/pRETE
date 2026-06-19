@@ -19,7 +19,7 @@ from rete.beta import (
     PNode,
 )
 from rete.condition import Condition, NccGroup, Production
-from rete.wme import WME
+from rete.fact import WME
 
 
 @dataclass
