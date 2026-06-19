@@ -9,26 +9,44 @@ description = ""
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "ruff"]
+dev = [
+    "pytest ==9.1.1",
+    "pytest-cov ==7.1.0",
+    "radon ==6.0.1",
+    "ruff ==0.15.18",
+    "xenon ==0.9.3",
+    "RETE",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rete"]
 
 [tool.hatch.envs.default.scripts]
-# hatch run lint | test | check
+easy = "radon cc -s src/ tests/"
 lint = "ruff check src/ tests/"
 test = "pytest --cov"
-check = ["ruff check src/ tests/", "pytest --cov"]
+check = [
+    "xenon --max-absolute A --max-modules A --max-average A src/ tests/",
+    "ruff check src/ tests/",
+    "pytest --cov",
+]
 
 [tool.ruff]
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "C90"]  # pycodestyle, pyflakes, mccabe complexity
-mccabe.max-complexity = 5   # enforces cyclomatic complexity grade A
+select = [
+    "E",
+    "F",
+    "C90",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 5
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.coverage.run]
 source = ["src/rete"]
