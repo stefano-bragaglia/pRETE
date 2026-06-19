@@ -589,6 +589,8 @@ def test_ncc_retroactive_retraction():
 def test_ncc_initialization_with_existing_wmes():
     """add_production when NCC match already present → not fired."""
     net = ReteNetwork()
+    # Pre-build alpha network so add_wme stores the WME before add_production.
+    net.root.build_or_share_alpha_memory(Condition("b1", "color", "red"))
     net.add_wme(WME("b1", "color", "red"))
     net.add_production(_prod([NccGroup((Condition("b1", "color", "red"),))]))
     assert net.conflict_set == []

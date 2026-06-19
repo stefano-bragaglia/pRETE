@@ -761,36 +761,37 @@ def test_ncc_partner_retract_from_buffer():
 def test_ncc_partner_retract_decrements_count():
     ncc, partner, _rec = _make_ncc_pair(owner_length=0)
     base = Token()
+    ncc.items.append(NccToken(token=base, count=0))
     result = Token(wmes=(WME("x", "a", "v"),))
-    ncc_tok = NccToken(token=base, count=1, results=[result])
-    ncc.items.append(ncc_tok)
-    partner.items.append(result)
+    partner.left_activate(result)  # registers in beta_tokens; count: 0→1
     partner.left_retract(result)
-    assert ncc_tok.count == 0
-    assert result not in ncc_tok.results
+    assert ncc.items[0].count == 0
+    assert result not in ncc.items[0].results
 
 
 def test_ncc_partner_retract_asserts_when_count_reaches_zero():
     ncc, partner, rec = _make_ncc_pair(owner_length=0)
     base = Token()
+    ncc.items.append(NccToken(token=base, count=0))
     result = Token(wmes=(WME("x", "a", "v"),))
-    ncc_tok = NccToken(token=base, count=1, results=[result])
-    ncc.items.append(ncc_tok)
-    partner.items.append(result)
-    partner.left_retract(result)
+    partner.left_activate(result)  # count: 0→1, triggers retract on rec
+    rec.retracted.clear()          # reset: only test left_retract effect
+    partner.left_retract(result)   # count: 1→0 → re-assert base
     assert rec.activated == [base]
 
 
 def test_ncc_partner_retract_no_assert_count_stays_positive():
     ncc, partner, rec = _make_ncc_pair(owner_length=0)
     base = Token()
-    result = Token(wmes=(WME("x", "a", "v"),))
-    ncc_tok = NccToken(token=base, count=2, results=[result])
-    ncc.items.append(ncc_tok)
-    partner.items.append(result)
-    partner.left_retract(result)
+    ncc.items.append(NccToken(token=base, count=0))
+    result1 = Token(wmes=(WME("x", "a", "v"),))
+    result2 = Token(wmes=(WME("y", "b", "w"),))
+    partner.left_activate(result1)  # count: 0→1, retracts base
+    partner.left_activate(result2)  # count: 1→2 (blocked, no retract)
+    rec.retracted.clear()
+    partner.left_retract(result1)   # count: 2→1, still blocked
     assert rec.activated == []
-    assert ncc_tok.count == 1
+    assert ncc.items[0].count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -846,12 +847,13 @@ def test_ncc_node_retract_propagated_token():
 
 
 def test_ncc_node_retract_blocked_token():
-    ncc, _partner, rec = _make_ncc_pair(owner_length=0)
-    result = Token(wmes=(WME("x", "a", "v"),))
-    ncc.new_result_buffer.append(result)
+    ncc, partner, rec = _make_ncc_pair(owner_length=0)
     t = Token()
-    ncc.left_activate(t)  # count=1 → blocked
-    ncc.left_retract(t)
+    ncc.left_activate(t)                        # count=0 → propagated
+    result = Token(wmes=(WME("x", "a", "v"),))
+    partner.left_activate(result)               # count: 0→1, retracts from rec
+    rec.retracted.clear()                       # reset: only test left_retract
+    ncc.left_retract(t)                         # count=1 → children NOT called
     assert rec.retracted == []
     assert ncc.items == []
 

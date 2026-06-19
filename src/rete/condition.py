@@ -1,6 +1,6 @@
 """Condition and Production types for the Rete algorithm LHS.
 
-:see: Doorenbos §2.1, §2.2
+:see: Doorenbos §2.1, §2.2, §2.8
 """
 from __future__ import annotations
 
@@ -58,6 +58,19 @@ class Condition:
         )
 
 
+@dataclass(frozen=True)
+class NccGroup:
+    """A group of conditions to be conjunctively negated (Doorenbos §2.8).
+
+    The production fires only when **no** joint match of all conditions in
+    the group exists in working memory.
+
+    :see: Doorenbos §2.8
+    """
+
+    conditions: tuple[Condition, ...]
+
+
 @dataclass
 class Production:
     """A production rule: an LHS list of conditions and a callable RHS.
@@ -68,5 +81,5 @@ class Production:
     :see: Doorenbos §2.1
     """
 
-    lhs: list[Condition]
+    lhs: list[Condition | NccGroup]
     rhs: Callable[[Token], None]
