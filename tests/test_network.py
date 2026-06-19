@@ -1,9 +1,9 @@
 """Unit tests for network.py — ReteNetwork.
 
-:see: Doorenbos §2.6, Appendix A
+:see: Doorenbos §2.6, Appendix A, §2.8
 """
-from rete.beta import BetaMemory, JoinNode, PNode
-from rete.condition import Condition, Production
+from rete.beta import BetaMemory, JoinNode, NccNode, PNode
+from rete.condition import Condition, NccGroup, Production
 from rete.network import ReteNetwork
 from rete.wme import WME
 
@@ -461,3 +461,147 @@ def test_negated_shares_alpha_memory():
     pn_pos = net.add_production(_prod([Condition("b1", "color", "red")]))
     pn_neg = net.add_production(_prod([Condition("b1", "color", "red", negated=True)]))
     assert pn_pos.parent_join.alpha_memory is pn_neg.parent_join.alpha_memory
+
+
+# ---------------------------------------------------------------------------
+# Bug regression — double-retraction when removing a positive WME (Phase 8)
+# ---------------------------------------------------------------------------
+
+
+def test_remove_positive_wme_with_active_match():
+    """Removing the positive WME of a [pos, neg] match must not raise."""
+    net = ReteNetwork()
+    net.add_production(_prod([
+        Condition("b1", "color", "red"),
+        Condition("b1", "size", "large", negated=True),
+    ]))
+    w = WME("b1", "color", "red")
+    net.add_wme(w)
+    assert len(net.conflict_set) == 1
+    net.remove_wme(w)  # raised ValueError before the idempotency fix
+    assert net.conflict_set == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — conjunctive negations (Doorenbos §2.8)
+# ---------------------------------------------------------------------------
+
+
+def test_ncc_no_match_fires():
+    net = ReteNetwork()
+    net.add_production(_prod([NccGroup((Condition("b1", "color", "red"),))]))
+    assert len(net.conflict_set) == 1
+
+
+def test_ncc_blocked_by_match():
+    net = ReteNetwork()
+    net.add_production(_prod([NccGroup((Condition("b1", "color", "red"),))]))
+    net.add_wme(WME("b1", "color", "red"))
+    assert net.conflict_set == []
+
+
+def test_ncc_unblocked_on_retraction():
+    net = ReteNetwork()
+    net.add_production(_prod([NccGroup((Condition("b1", "color", "red"),))]))
+    w = WME("b1", "color", "red")
+    net.add_wme(w)
+    assert net.conflict_set == []
+    net.remove_wme(w)
+    assert len(net.conflict_set) == 1
+
+
+def test_ncc_two_conditions_both_absent_fires():
+    net = ReteNetwork()
+    net.add_production(_prod([NccGroup((
+        Condition("b1", "color", "red"),
+        Condition("b1", "size", "large"),
+    ))]))
+    assert len(net.conflict_set) == 1
+
+
+def test_ncc_two_conditions_partial_match_fires():
+    """Only one WME present → subnetwork join incomplete → NCC still fires."""
+    net = ReteNetwork()
+    net.add_production(_prod([NccGroup((
+        Condition("b1", "color", "red"),
+        Condition("b1", "size", "large"),
+    ))]))
+    net.add_wme(WME("b1", "color", "red"))
+    assert len(net.conflict_set) == 1
+
+
+def test_ncc_two_conditions_full_match_blocked():
+    """Both WMEs present → subnetwork completes → NCC blocked."""
+    net = ReteNetwork()
+    net.add_production(_prod([NccGroup((
+        Condition("b1", "color", "red"),
+        Condition("b1", "size", "large"),
+    ))]))
+    net.add_wme(WME("b1", "color", "red"))
+    net.add_wme(WME("b1", "size", "large"))
+    assert net.conflict_set == []
+
+
+def test_ncc_positive_then_ncc_fires():
+    net = ReteNetwork()
+    net.add_production(_prod([
+        Condition("b1", "color", "red"),
+        NccGroup((Condition("b1", "size", "large"),)),
+    ]))
+    net.add_wme(WME("b1", "color", "red"))
+    assert len(net.conflict_set) == 1
+
+
+def test_ncc_positive_then_ncc_blocked():
+    net = ReteNetwork()
+    net.add_production(_prod([
+        Condition("b1", "color", "red"),
+        NccGroup((Condition("b1", "size", "large"),)),
+    ]))
+    net.add_wme(WME("b1", "color", "red"))
+    net.add_wme(WME("b1", "size", "large"))
+    assert net.conflict_set == []
+
+
+def test_ncc_positive_then_ncc_unblocked():
+    net = ReteNetwork()
+    net.add_production(_prod([
+        Condition("b1", "color", "red"),
+        NccGroup((Condition("b1", "size", "large"),)),
+    ]))
+    net.add_wme(WME("b1", "color", "red"))
+    w_block = WME("b1", "size", "large")
+    net.add_wme(w_block)
+    assert net.conflict_set == []
+    net.remove_wme(w_block)
+    assert len(net.conflict_set) == 1
+
+
+def test_ncc_retroactive_retraction():
+    """NCC fires, then a subnetwork match arrives → match retracted."""
+    net = ReteNetwork()
+    net.add_production(_prod([NccGroup((Condition("b1", "color", "red"),))]))
+    assert len(net.conflict_set) == 1
+    net.add_wme(WME("b1", "color", "red"))
+    assert net.conflict_set == []
+
+
+def test_ncc_initialization_with_existing_wmes():
+    """add_production when NCC match already present → not fired."""
+    net = ReteNetwork()
+    net.add_wme(WME("b1", "color", "red"))
+    net.add_production(_prod([NccGroup((Condition("b1", "color", "red"),))]))
+    assert net.conflict_set == []
+
+
+def test_ncc_gc_on_remove_production():
+    net = ReteNetwork()
+    pn = net.add_production(_prod([NccGroup((Condition("b1", "color", "red"),))]))
+    net.remove_production(pn)
+    assert net.conflict_set == []
+
+
+def test_ncc_pnode_parent_join_is_ncc_node():
+    net = ReteNetwork()
+    pn = net.add_production(_prod([NccGroup((Condition("b1", "color", "red"),))]))
+    assert isinstance(pn.parent_join, NccNode)

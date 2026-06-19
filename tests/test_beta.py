@@ -1,6 +1,6 @@
 """Unit tests for beta.py — positive and negative join nodes.
 
-:see: Doorenbos §2.4, §2.6, §2.7
+:see: Doorenbos §2.4, §2.6, §2.7, §2.8
 """
 from rete.alpha import AlphaMemory
 from rete.beta import (
@@ -9,6 +9,9 @@ from rete.beta import (
     Instantiation,
     JoinNode,
     JoinTest,
+    NccNode,
+    NccPartnerNode,
+    NccToken,
     NegativeJoinNode,
     NegativeToken,
     PNode,
@@ -643,5 +646,240 @@ def test_njn_update_child_only_sends_propagated():
     njn.items.append(NegativeToken(token=t1, count=1))
     new_child = _Recorder()
     njn.update_child(new_child)
+    assert new_child.activated == [t0]
+    assert new_child.retracted == []
+
+
+# ---------------------------------------------------------------------------
+# Bug regression — double-retraction via unextended token (Phase 8 fix)
+# ---------------------------------------------------------------------------
+
+
+def test_beta_memory_left_retract_idempotent():
+    """left_retract called twice must not raise (double-retraction guard)."""
+    bm = BetaMemory()
+    t = Token(wmes=(WME("b1", "color", "red"),))
+    bm.left_activate(t)
+    bm.left_retract(t)
+    bm.left_retract(t)  # must be a no-op
+
+
+def test_pnode_left_retract_idempotent():
+    """left_retract called twice must not raise (double-retraction guard)."""
+    pn = PNode(production=_make_production(), conflict_set=[])
+    t = Token(wmes=(WME("b1", "color", "red"),))
+    pn.left_activate(t)
+    pn.left_retract(t)
+    pn.left_retract(t)  # must be a no-op
+
+
+# ---------------------------------------------------------------------------
+# NCC helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_ncc_pair(owner_length: int = 0):
+    """Return ``(NccNode, NccPartnerNode, _Recorder)`` wired together."""
+    rec = _Recorder()
+    ncc = NccNode(children=[rec], owner_length=owner_length)
+    partner = NccPartnerNode(ncc_node=ncc)
+    ncc.partner = partner
+    return ncc, partner, rec
+
+
+# ---------------------------------------------------------------------------
+# NccToken
+# ---------------------------------------------------------------------------
+
+
+def test_ncc_token_defaults():
+    nt = NccToken(token=Token())
+    assert nt.count == 0
+    assert nt.results == []
+
+
+# ---------------------------------------------------------------------------
+# NccPartnerNode — left_activate
+# ---------------------------------------------------------------------------
+
+
+def test_ncc_partner_activate_buffers_when_no_ncc_token():
+    ncc, partner, _rec = _make_ncc_pair(owner_length=0)
+    result = Token(wmes=(WME("x", "a", "v"),))
+    partner.left_activate(result)
+    assert result in ncc.new_result_buffer
+    assert result in partner.items
+
+
+def test_ncc_partner_activate_increments_count():
+    ncc, partner, _rec = _make_ncc_pair(owner_length=0)
+    base = Token()
+    ncc_tok = NccToken(token=base, count=0)
+    ncc.items.append(ncc_tok)
+    result = Token(wmes=(WME("x", "a", "v"),))
+    partner.left_activate(result)
+    assert ncc_tok.count == 1
+    assert result in ncc_tok.results
+
+
+def test_ncc_partner_activate_retracts_when_count_was_zero():
+    ncc, partner, rec = _make_ncc_pair(owner_length=0)
+    base = Token()
+    ncc_tok = NccToken(token=base, count=0)
+    ncc.items.append(ncc_tok)
+    result = Token(wmes=(WME("x", "a", "v"),))
+    partner.left_activate(result)
+    assert rec.retracted == [base]
+    assert ncc_tok.count == 1
+
+
+def test_ncc_partner_activate_no_retract_when_already_blocked():
+    ncc, partner, rec = _make_ncc_pair(owner_length=0)
+    base = Token()
+    ncc_tok = NccToken(token=base, count=1)
+    ncc.items.append(ncc_tok)
+    result = Token(wmes=(WME("x", "a", "v"),))
+    partner.left_activate(result)
+    assert rec.retracted == []
+    assert ncc_tok.count == 2
+
+
+# ---------------------------------------------------------------------------
+# NccPartnerNode — left_retract
+# ---------------------------------------------------------------------------
+
+
+def test_ncc_partner_retract_from_buffer():
+    ncc, partner, _rec = _make_ncc_pair(owner_length=0)
+    result = Token(wmes=(WME("x", "a", "v"),))
+    partner.left_activate(result)  # lands in buffer
+    partner.left_retract(result)
+    assert result not in ncc.new_result_buffer
+    assert result not in partner.items
+
+
+def test_ncc_partner_retract_decrements_count():
+    ncc, partner, _rec = _make_ncc_pair(owner_length=0)
+    base = Token()
+    result = Token(wmes=(WME("x", "a", "v"),))
+    ncc_tok = NccToken(token=base, count=1, results=[result])
+    ncc.items.append(ncc_tok)
+    partner.items.append(result)
+    partner.left_retract(result)
+    assert ncc_tok.count == 0
+    assert result not in ncc_tok.results
+
+
+def test_ncc_partner_retract_asserts_when_count_reaches_zero():
+    ncc, partner, rec = _make_ncc_pair(owner_length=0)
+    base = Token()
+    result = Token(wmes=(WME("x", "a", "v"),))
+    ncc_tok = NccToken(token=base, count=1, results=[result])
+    ncc.items.append(ncc_tok)
+    partner.items.append(result)
+    partner.left_retract(result)
+    assert rec.activated == [base]
+
+
+def test_ncc_partner_retract_no_assert_count_stays_positive():
+    ncc, partner, rec = _make_ncc_pair(owner_length=0)
+    base = Token()
+    result = Token(wmes=(WME("x", "a", "v"),))
+    ncc_tok = NccToken(token=base, count=2, results=[result])
+    ncc.items.append(ncc_tok)
+    partner.items.append(result)
+    partner.left_retract(result)
+    assert rec.activated == []
+    assert ncc_tok.count == 1
+
+
+# ---------------------------------------------------------------------------
+# NccNode — left_activate
+# ---------------------------------------------------------------------------
+
+
+def test_ncc_node_activate_empty_buffer_propagates():
+    ncc, _partner, rec = _make_ncc_pair(owner_length=0)
+    t = Token()
+    ncc.left_activate(t)
+    assert rec.activated == [t]
+    assert ncc.items[0].count == 0
+
+
+def test_ncc_node_activate_drains_matching_buffer():
+    ncc, _partner, rec = _make_ncc_pair(owner_length=0)
+    result = Token(wmes=(WME("x", "a", "v"),))
+    ncc.new_result_buffer.append(result)
+    t = Token()
+    ncc.left_activate(t)
+    assert rec.activated == []
+    assert ncc.items[0].count == 1
+    assert ncc.new_result_buffer == []
+
+
+def test_ncc_node_activate_ignores_nonmatching_buffer():
+    w_main = WME("b1", "color", "red")
+    w_other = WME("b2", "color", "blue")
+    ncc, _partner, rec = _make_ncc_pair(owner_length=1)
+    # result whose first WME is w_other — does not match left token (w_main,)
+    result = Token(wmes=(w_other, WME("x", "y", "z")))
+    ncc.new_result_buffer.append(result)
+    t = Token(wmes=(w_main,))
+    ncc.left_activate(t)
+    assert rec.activated == [t]
+    assert ncc.items[0].count == 0
+    assert result in ncc.new_result_buffer  # untouched
+
+
+# ---------------------------------------------------------------------------
+# NccNode — left_retract
+# ---------------------------------------------------------------------------
+
+
+def test_ncc_node_retract_propagated_token():
+    ncc, _partner, rec = _make_ncc_pair(owner_length=0)
+    t = Token()
+    ncc.left_activate(t)  # count=0 → propagated
+    ncc.left_retract(t)
+    assert rec.retracted == [t]
+    assert ncc.items == []
+
+
+def test_ncc_node_retract_blocked_token():
+    ncc, _partner, rec = _make_ncc_pair(owner_length=0)
+    result = Token(wmes=(WME("x", "a", "v"),))
+    ncc.new_result_buffer.append(result)
+    t = Token()
+    ncc.left_activate(t)  # count=1 → blocked
+    ncc.left_retract(t)
+    assert rec.retracted == []
+    assert ncc.items == []
+
+
+def test_ncc_node_retract_clears_partner_items():
+    ncc, partner, _rec = _make_ncc_pair(owner_length=0)
+    t = Token()
+    result = Token(wmes=(WME("x", "a", "v"),))
+    partner.items.append(result)
+    ncc_tok = NccToken(token=t, count=1, results=[result])
+    ncc.items.append(ncc_tok)
+    ncc.left_retract(t)
+    assert result not in partner.items
+    assert ncc_tok.results == []
+
+
+# ---------------------------------------------------------------------------
+# NccNode — update_child
+# ---------------------------------------------------------------------------
+
+
+def test_ncc_node_update_child_only_propagated():
+    ncc, _partner, _rec = _make_ncc_pair(owner_length=0)
+    t0 = Token()
+    t1 = Token(wmes=(WME("b1", "color", "red"),))
+    ncc.items.append(NccToken(token=t0, count=0))
+    ncc.items.append(NccToken(token=t1, count=1))
+    new_child = _Recorder()
+    ncc.update_child(new_child)
     assert new_child.activated == [t0]
     assert new_child.retracted == []
