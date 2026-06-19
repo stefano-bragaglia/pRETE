@@ -2,16 +2,50 @@
 
 :see: Doorenbos Ch. 4–5
 """
+from dataclasses import dataclass
+
 from rete.alpha import AlphaMemory
-from rete.beta import (
-    BetaMemory,
-    JoinNode,
-    NegativeJoinNode,
-)
-from rete.condition import Condition, Production
+from rete.beta import BetaMemory, JoinNode, NegativeJoinNode
+from rete.condition import Pattern, Production
 from rete.engine import InferenceEngine
+from rete.fact import Fact, Token
 from rete.network import ReteNetwork
-from rete.fact import Token, WME
+
+
+# ---------------------------------------------------------------------------
+# Test dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Color:
+    """Fact type for UL tests."""
+
+    block: str
+    color: str
+
+
+@dataclass
+class Size:
+    """Fact type for two-condition UL tests."""
+
+    block: str
+    size: str
+
+
+# ---------------------------------------------------------------------------
+# Module-level alpha-test functions (stable ids for sharing tests)
+# ---------------------------------------------------------------------------
+
+
+def _is_red(obj: Color) -> bool:
+    """Alpha test: Color.color == 'red'."""
+    return obj.color == "red"
+
+
+def _is_large(obj: Size) -> bool:
+    """Alpha test: Size.size == 'large'."""
+    return obj.size == "large"
 
 
 # ---------------------------------------------------------------------------
@@ -19,10 +53,15 @@ from rete.fact import Token, WME
 # ---------------------------------------------------------------------------
 
 
+def _any_am() -> AlphaMemory:
+    """Return an AlphaMemory that accepts any Fact (used in isolated node tests)."""
+    return AlphaMemory(type_=object, predicate=lambda _: True)
+
+
 def _jn(left=None, am=None) -> tuple[JoinNode, AlphaMemory, BetaMemory]:
     """Return a wired ``(JoinNode, AlphaMemory, child BetaMemory)``."""
     if am is None:
-        am = AlphaMemory()
+        am = _any_am()
     beta = left if left is not None else BetaMemory()
     child = BetaMemory()
     jn = JoinNode(children=[child], alpha_memory=am, left_input=beta, tests=[])
@@ -35,7 +74,7 @@ def _jn(left=None, am=None) -> tuple[JoinNode, AlphaMemory, BetaMemory]:
 def _njn(left=None, am=None) -> tuple[NegativeJoinNode, AlphaMemory]:
     """Return a wired ``(NegativeJoinNode, AlphaMemory)``."""
     if am is None:
-        am = AlphaMemory()
+        am = _any_am()
     beta = left if left is not None else BetaMemory()
     njn = NegativeJoinNode(children=[], alpha_memory=am, left_input=beta, tests=[])
     am.successors.append(njn)
@@ -44,8 +83,9 @@ def _njn(left=None, am=None) -> tuple[NegativeJoinNode, AlphaMemory]:
     return njn, am
 
 
-def _token(*ids: str) -> Token:
-    return Token(wmes=tuple(WME(i, "a", "v") for i in ids))
+def _token(*blocks: str) -> Token:
+    """Return a Token containing one Color Fact per block name."""
+    return Token(facts=tuple(Fact(Color(b, "x")) for b in blocks))
 
 
 # ---------------------------------------------------------------------------
@@ -96,15 +136,15 @@ def test_right_relink_on_left_activate():
 
 
 def test_right_unlink_no_spurious_right_activate():
-    """WME added while right-unlinked does not reach the join node."""
+    """Fact added while right-unlinked does not reach the join node."""
     bm = BetaMemory()
     jn, am, child = _jn(left=bm)
     tok = _token("x")
     bm.left_activate(tok)
-    bm.left_retract(tok)          # right-unlink — child is also empty now
+    bm.left_retract(tok)          # right-unlink
 
-    wme = WME("b1", "color", "red")
-    am.activate(wme)              # right activation skipped — jn not in am.successors
+    fact = Fact(Color("b1", "red"))
+    am.activate(fact)              # right activation skipped — jn not in am.successors
     assert child.items == []
 
 
@@ -117,10 +157,10 @@ def test_right_unlink_correctness_after_relink():
     bm.left_activate(tok)
     bm.left_retract(tok)          # right-unlink
 
-    wme = WME("b1", "color", "red")
-    am.activate(wme)              # arrives while unlinked — no match yet
+    fact = Fact(Color("b1", "red"))
+    am.activate(fact)              # arrives while unlinked — no match yet
 
-    bm.left_activate(tok)         # re-link + join drives tok vs wme
+    bm.left_activate(tok)         # re-link + join drives tok vs fact
     assert len(child.items) == 1
 
 
@@ -138,22 +178,22 @@ def test_left_unlink_after_alpha_drains():
     """JoinNode leaves beta.successors when its alpha memory goes empty."""
     bm = BetaMemory()
     jn, am, _ = _jn(left=bm)
-    wme = WME("b1", "color", "red")
-    am.activate(wme)
-    am.deactivate(wme)
+    f = Fact(Color("b1", "red"))
+    am.activate(f)
+    am.deactivate(f)
     assert jn not in bm.successors
     assert jn.left_unlinked
 
 
 def test_left_unlink_partial_drain_stays_linked():
-    """Left-unlink fires only when the LAST WME leaves the alpha memory."""
+    """Left-unlink fires only when the LAST Fact leaves the alpha memory."""
     bm = BetaMemory()
     jn, am, _ = _jn(left=bm)
-    w1 = WME("b1", "color", "red")
-    w2 = WME("b2", "color", "red")
-    am.activate(w1)
-    am.activate(w2)
-    am.deactivate(w1)
+    f1 = Fact(Color("b1", "red"))
+    f2 = Fact(Color("b2", "red"))
+    am.activate(f1)
+    am.activate(f2)
+    am.deactivate(f1)
     assert jn in bm.successors
     assert not jn.left_unlinked
 
@@ -162,12 +202,12 @@ def test_left_relink_on_right_activate():
     """JoinNode re-enters beta.successors on the next right activation."""
     bm = BetaMemory()
     jn, am, _ = _jn(left=bm)
-    wme = WME("b1", "color", "red")
-    am.activate(wme)
-    am.deactivate(wme)            # left-unlink
+    f = Fact(Color("b1", "red"))
+    am.activate(f)
+    am.deactivate(f)               # left-unlink
     assert jn.left_unlinked
-    wme2 = WME("b2", "color", "red")
-    am.activate(wme2)             # re-link
+    f2 = Fact(Color("b2", "red"))
+    am.activate(f2)                # re-link
     assert jn in bm.successors
     assert not jn.left_unlinked
 
@@ -176,12 +216,12 @@ def test_left_unlink_no_spurious_left_activate():
     """Token added to beta while left-unlinked does not reach the join node."""
     bm = BetaMemory()
     jn, am, child = _jn(left=bm)
-    wme = WME("b1", "color", "red")
-    am.activate(wme)
-    am.deactivate(wme)            # left-unlink
+    f = Fact(Color("b1", "red"))
+    am.activate(f)
+    am.deactivate(f)               # left-unlink
 
     tok = _token("x")
-    bm.left_activate(tok)         # jn not in bm.successors — skipped
+    bm.left_activate(tok)          # jn not in bm.successors — skipped
     assert child.items == []
 
 
@@ -190,15 +230,15 @@ def test_left_unlink_correctness_after_relink():
     bm = BetaMemory()
     jn, am, child = _jn(left=bm)
 
-    wme = WME("b1", "color", "red")
-    am.activate(wme)
-    am.deactivate(wme)            # left-unlink
+    f = Fact(Color("b1", "red"))
+    am.activate(f)
+    am.deactivate(f)               # left-unlink
 
     tok = _token("x")
-    bm.left_activate(tok)         # arrives while unlinked — no match yet
+    bm.left_activate(tok)          # arrives while unlinked — no match yet
 
-    wme2 = WME("b2", "color", "blue")
-    am.activate(wme2)             # re-link + replay beta: tok joins wme2
+    f2 = Fact(Color("b2", "blue"))
+    am.activate(f2)                # re-link + replay beta: tok joins f2
     assert len(child.items) == 1
 
 
@@ -217,8 +257,8 @@ def test_njn_right_unlink_after_items_drain():
     bm = BetaMemory()
     njn, am = _njn(left=bm)
     tok = _token("x")
-    bm.left_activate(tok)         # populates njn.items
-    bm.left_retract(tok)          # drains njn.items → right-unlink
+    bm.left_activate(tok)          # populates njn.items
+    bm.left_retract(tok)           # drains njn.items → right-unlink
     assert njn not in am.successors
     assert njn.right_unlinked
 
@@ -229,7 +269,7 @@ def test_njn_right_relink_on_left_activate():
     njn, am = _njn(left=bm)
     tok = _token("x")
     bm.left_activate(tok)
-    bm.left_retract(tok)          # right-unlink
+    bm.left_retract(tok)           # right-unlink
     bm.left_activate(_token("y"))  # re-link
     assert njn in am.successors
     assert not njn.right_unlinked
@@ -240,30 +280,27 @@ def test_njn_right_relink_on_left_activate():
 # ---------------------------------------------------------------------------
 
 
-def test_build_time_right_unlink():
-    """JoinNode built when beta is empty starts right-unlinked."""
+def test_build_time_no_right_unlink_with_dummy_top():
+    """JoinNode on DummyTopNode (always one token) is never right-unlinked."""
     net = ReteNetwork()
     pn = net.add_production(Production(
-        lhs=[Condition("b1", "color", "red")],
+        lhs=[Pattern(Color, alpha_tests=(_is_red,))],
         rhs=lambda t: None,
     ))
     jn = pn.parent_join
-    # Dummy top node always has one token — never right-unlinked.
     assert not jn.right_unlinked
 
 
-def test_build_time_right_unlink_with_beta():
+def test_build_time_right_unlink_with_empty_beta():
     """JoinNode whose BetaMemory is empty at build time starts right-unlinked."""
     net = ReteNetwork()
+    p0 = Pattern(Color, bindings=(("$block", "block"),))
+    p1 = Pattern(Size, alpha_tests=(_is_large,))
     pn = net.add_production(Production(
-        lhs=[
-            Condition("?x", "color", "red"),
-            Condition("?x", "size", "large"),
-        ],
+        lhs=[p0, p1],
         rhs=lambda t: None,
     ))
     jn2 = pn.parent_join
-    # No WMEs yet — the beta memory feeding jn2 is empty → right-unlinked.
     assert jn2.right_unlinked
 
 
@@ -271,11 +308,10 @@ def test_build_time_left_unlink():
     """JoinNode whose alpha memory is empty at build time starts left-unlinked."""
     net = ReteNetwork()
     pn = net.add_production(Production(
-        lhs=[Condition("b1", "color", "red")],
+        lhs=[Pattern(Color, alpha_tests=(_is_red,))],
         rhs=lambda t: None,
     ))
     jn = pn.parent_join
-    # No WMEs in the network → alpha memory is empty → left-unlinked.
     assert jn.left_unlinked
 
 
@@ -287,14 +323,9 @@ def test_build_time_left_unlink():
 def test_gc_right_unlinked_node():
     """remove_production works when the join node is right-unlinked."""
     net = ReteNetwork()
-    pn = net.add_production(Production(
-        lhs=[
-            Condition("?x", "color", "red"),
-            Condition("?x", "size", "large"),
-        ],
-        rhs=lambda t: None,
-    ))
-    # jn2 is right-unlinked (beta empty at build); remove_production must not crash.
+    p0 = Pattern(Color, bindings=(("$block", "block"),))
+    p1 = Pattern(Size, alpha_tests=(_is_large,))
+    pn = net.add_production(Production(lhs=[p0, p1], rhs=lambda t: None))
     net.remove_production(pn)
 
 
@@ -302,15 +333,14 @@ def test_gc_left_unlinked_node():
     """remove_production works when the join node is left-unlinked."""
     net = ReteNetwork()
     pn = net.add_production(Production(
-        lhs=[Condition("b1", "color", "red")],
+        lhs=[Pattern(Color, alpha_tests=(_is_red,))],
         rhs=lambda t: None,
     ))
-    # jn is left-unlinked (alpha empty at build); remove_production must not crash.
     net.remove_production(pn)
 
 
 # ---------------------------------------------------------------------------
-# End-to-end correctness with UL active
+# End-to-end correctness with UL active (engine loop via network directly)
 # ---------------------------------------------------------------------------
 
 
@@ -319,10 +349,10 @@ def test_ul_end_to_end_match():
     engine = InferenceEngine()
     fired = []
     engine.add_production(Production(
-        lhs=[Condition("b1", "color", "red")],
+        lhs=[Pattern(Color, alpha_tests=(_is_red,))],
         rhs=lambda t: fired.append(t),
     ))
-    engine.add_wme(WME("b1", "color", "red"))
+    engine.network.add_fact(Fact(Color("b1", "red")))
     engine.run()
     assert len(fired) == 1
 
@@ -332,12 +362,12 @@ def test_ul_end_to_end_retraction():
     engine = InferenceEngine()
     fired = []
     engine.add_production(Production(
-        lhs=[Condition("b1", "color", "red")],
+        lhs=[Pattern(Color, alpha_tests=(_is_red,))],
         rhs=lambda t: fired.append(t),
     ))
-    wme = WME("b1", "color", "red")
-    engine.add_wme(wme)
-    engine.remove_wme(wme)
+    f = Fact(Color("b1", "red"))
+    engine.network.add_fact(f)
+    engine.network.remove_fact(f)
     engine.run()
     assert fired == []
 
@@ -346,26 +376,24 @@ def test_ul_end_to_end_two_conditions():
     """Two-condition rule matches correctly despite right-unlinking on inner join."""
     engine = InferenceEngine()
     fired = []
-    engine.add_production(Production(
-        lhs=[
-            Condition("?x", "color", "red"),
-            Condition("?x", "size", "large"),
-        ],
-        rhs=lambda t: fired.append(t),
-    ))
-    engine.add_wme(WME("b1", "color", "red"))
-    engine.add_wme(WME("b1", "size", "large"))
+    from rete.condition import JoinSpec
+    p0 = Pattern(Color, alpha_tests=(_is_red,), bindings=(("$block", "block"),))
+    spec = JoinSpec("block", "$block")
+    p1 = Pattern(Size, alpha_tests=(_is_large,), join_tests=(spec,))
+    engine.add_production(Production(lhs=[p0, p1], rhs=lambda t: fired.append(t)))
+    engine.network.add_fact(Fact(Color("b1", "red")))
+    engine.network.add_fact(Fact(Size("b1", "large")))
     engine.run()
     assert len(fired) == 1
 
 
-def test_ul_end_to_end_wme_before_production():
-    """WMEs added before the production still match after left-relink."""
+def test_ul_end_to_end_fact_before_production():
+    """Facts added before the production still match after left-relink."""
     engine = InferenceEngine()
-    engine.add_wme(WME("b1", "color", "red"))
+    engine.network.add_fact(Fact(Color("b1", "red")))
     fired = []
     engine.add_production(Production(
-        lhs=[Condition("b1", "color", "red")],
+        lhs=[Pattern(Color, alpha_tests=(_is_red,))],
         rhs=lambda t: fired.append(t),
     ))
     engine.run()
