@@ -1,26 +1,41 @@
+"""Working memory elements and partial-match tokens for the Rete algorithm.
+
+:see: Doorenbos §2.1, §2.3
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rete.alpha import AlphaMemory
 
 
 @dataclass(eq=False)
 class WME:
-    """Working memory element: a (id, attribute, value) triple (Doorenbos §2.1)."""
+    """A working memory element: an ``(id, attribute, value)`` triple.
+
+    Hashed and compared by identity so two WMEs with identical fields
+    remain distinct facts in working memory.
+
+    :see: Doorenbos §2.1
+    """
 
     id: str
     attribute: str
     value: str
-    # ponytail: untyped lists; typed to AlphaMemory/Token once those exist (Phase 2/6)
-    alpha_memories: list = field(default_factory=list, repr=False)
+    alpha_memories: list[AlphaMemory] = field(default_factory=list, repr=False)
     beta_tokens: list = field(default_factory=list, repr=False)
 
 
 @dataclass
 class Token:
-    """Ordered partial match (Doorenbos §2.3).
+    """An ordered sequence of WMEs representing a partial match.
 
-    Extend by constructing a new token: Token(wmes=parent.wmes + (wme,)).
-    ponytail: flat tuple; switch to linked-list (parent + wme) if memory grows.
+    Extend immutably: ``Token(wmes=parent.wmes + (wme,))``.
+
+    :see: Doorenbos §2.3
     """
 
+    # ponytail: flat tuple; switch to linked-list (parent + wme) if memory grows.
     wmes: tuple[WME, ...] = ()
