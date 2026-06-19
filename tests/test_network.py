@@ -244,3 +244,123 @@ def test_integration_remove_then_activate():
     net.remove_production(pn)
     net.root.activate(WME("b1", "color", "red"))
     assert net.conflict_set == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — add_wme / remove_wme (Doorenbos §2.5)
+# ---------------------------------------------------------------------------
+
+
+def test_add_wme_creates_match():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red")]))
+    net.add_wme(WME("b1", "color", "red"))
+    assert len(net.conflict_set) == 1
+
+
+def test_add_wme_no_match():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red")]))
+    net.add_wme(WME("b1", "color", "blue"))
+    assert net.conflict_set == []
+
+
+def test_add_wme_populates_alpha_memories():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red")]))
+    w = WME("b1", "color", "red")
+    net.add_wme(w)
+    assert w.alpha_memories
+
+
+def test_add_wme_populates_beta_tokens():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red")]))
+    w = WME("b1", "color", "red")
+    net.add_wme(w)
+    assert w.beta_tokens
+
+
+def test_add_wme_two_conditions():
+    net = ReteNetwork()
+    net.add_production(
+        _prod([Condition("?x", "color", "red"), Condition("?x", "size", "large")])
+    )
+    w1, w2 = WME("b1", "color", "red"), WME("b1", "size", "large")
+    net.add_wme(w1)
+    net.add_wme(w2)
+    assert len(net.conflict_set) == 1
+
+
+def test_remove_wme_clears_conflict_set():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red")]))
+    w = WME("b1", "color", "red")
+    net.add_wme(w)
+    assert len(net.conflict_set) == 1
+    net.remove_wme(w)
+    assert net.conflict_set == []
+
+
+def test_remove_wme_clears_alpha_memories():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red")]))
+    w = WME("b1", "color", "red")
+    net.add_wme(w)
+    net.remove_wme(w)
+    assert w.alpha_memories == []
+
+
+def test_remove_wme_clears_beta_tokens():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red")]))
+    w = WME("b1", "color", "red")
+    net.add_wme(w)
+    net.remove_wme(w)
+    assert w.beta_tokens == []
+
+
+def test_remove_wme_partial_two_condition_match():
+    net = ReteNetwork()
+    net.add_production(
+        _prod([Condition("?x", "color", "red"), Condition("?x", "size", "large")])
+    )
+    w1, w2 = WME("b1", "color", "red"), WME("b1", "size", "large")
+    net.add_wme(w1)
+    net.add_wme(w2)
+    assert len(net.conflict_set) == 1
+    net.remove_wme(w1)
+    assert net.conflict_set == []
+
+
+def test_remove_wme_second_of_two_conditions():
+    net = ReteNetwork()
+    net.add_production(
+        _prod([Condition("?x", "color", "red"), Condition("?x", "size", "large")])
+    )
+    w1, w2 = WME("b1", "color", "red"), WME("b1", "size", "large")
+    net.add_wme(w1)
+    net.add_wme(w2)
+    net.remove_wme(w2)
+    assert net.conflict_set == []
+
+
+def test_remove_wme_shared_production():
+    net = ReteNetwork()
+    c = Condition("b1", "color", "red")
+    net.add_production(_prod([c]))
+    net.add_production(_prod([c]))
+    w = WME("b1", "color", "red")
+    net.add_wme(w)
+    assert len(net.conflict_set) == 2
+    net.remove_wme(w)
+    assert net.conflict_set == []
+
+
+def test_remove_wme_idempotent_after_retract():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red")]))
+    w = WME("b1", "color", "blue")
+    net.add_wme(w)
+    net.remove_wme(w)
+    assert net.conflict_set == []
