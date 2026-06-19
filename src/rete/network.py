@@ -1,6 +1,6 @@
 """Rete network: production add / remove and alpha/beta network construction.
 
-:see: Doorenbos §2.6, Appendix A
+:see: Doorenbos §2.6, Appendix A, §2.8
 """
 from __future__ import annotations
 
@@ -13,10 +13,12 @@ from rete.beta import (
     Instantiation,
     JoinNode,
     JoinTest,
+    NccNode,
+    NccPartnerNode,
     NegativeJoinNode,
     PNode,
 )
-from rete.condition import Condition, Production
+from rete.condition import Condition, NccGroup, Production
 from rete.wme import WME
 
 
@@ -62,12 +64,12 @@ class ReteNetwork:
         :returns: the newly created :class:`PNode`
         :see: Doorenbos §2.6 ``add-production``
         """
-        jn = self._build_join_chain(production.lhs)
+        last = self._build_join_chain(production.lhs)
         pn = PNode(
-            production=production, conflict_set=self.conflict_set, parent_join=jn
+            production=production, conflict_set=self.conflict_set, parent_join=last
         )
-        jn.children.append(pn)
-        jn.update_child(pn)
+        last.children.append(pn)
+        last.update_child(pn)
         return pn
 
     def remove_production(self, p_node: PNode) -> None:
@@ -87,36 +89,109 @@ class ReteNetwork:
         p_node.parent_join = None
         if isinstance(jn, NegativeJoinNode):
             self._gc_negative_join_node(jn)
+        elif isinstance(jn, NccNode):
+            self._gc_ncc_node(jn)
         else:
             self._gc_join_node(jn)
 
     # ------------------------------------------------------------------
-    # Network construction helpers (Doorenbos §2.6)
+    # Network construction helpers (Doorenbos §2.6, §2.8)
     # ------------------------------------------------------------------
 
     def _build_join_chain(
-        self, lhs: list[Condition]
-    ) -> JoinNode | NegativeJoinNode:
+        self, lhs: list[Condition | NccGroup]
+    ) -> JoinNode | NegativeJoinNode | NccNode:
         """Build or share the join-node chain for *lhs*.
 
-        :param lhs: ordered list of conditions from the production LHS
-        :returns: the last join node (positive or negative) in the compiled chain
-        :see: Doorenbos §2.6 ``build-or-share-network-for-conditions``
+        :param lhs: ordered list of conditions / NCC groups from the production LHS
+        :returns: the last node in the compiled chain
+        :see: Doorenbos §2.6 ``build-or-share-network-for-conditions``, §2.8
         """
         left: BetaMemory | DummyTopNode = self.dummy_top
         earlier: list[Condition] = []
         last = None
-        for i, cond in enumerate(lhs):
-            am = self.root.build_or_share_alpha_memory(cond)
-            tests = JoinTest.extract(cond, earlier)
-            if cond.negated:
-                last = self._build_or_share_negative_join_node(left, am, tests)
+        for i, item in enumerate(lhs):
+            if isinstance(item, NccGroup):
+                last = self._build_ncc(left, earlier, item)
             else:
-                last = self._build_or_share_join_node(left, am, tests)
-            earlier.append(cond)
+                last = self._process_condition(item, left, earlier)
+                earlier.append(item)
             if i < len(lhs) - 1:
                 left = self._build_or_share_beta_memory(last)
         return last
+
+    def _process_condition(
+        self,
+        cond: Condition,
+        left: BetaMemory | DummyTopNode,
+        earlier: list[Condition],
+    ) -> JoinNode | NegativeJoinNode:
+        """Compile one :class:`Condition` into a join node, sharing if possible.
+
+        :param cond: the condition to compile
+        :param left: current left input
+        :param earlier: conditions already compiled (for variable tests)
+        """
+        am = self.root.build_or_share_alpha_memory(cond)
+        tests = JoinTest.extract(cond, earlier)
+        if cond.negated:
+            return self._build_or_share_negative_join_node(left, am, tests)
+        return self._build_or_share_join_node(left, am, tests)
+
+    def _build_ncc(
+        self,
+        left: BetaMemory | DummyTopNode,
+        earlier: list[Condition],
+        group: NccGroup,
+    ) -> NccNode:
+        """Build an NCC node and its subnetwork for *group*.
+
+        Partner is seeded first so any existing matches land in
+        ``new_result_buffer``; the NCC node then drains that buffer as it
+        processes left tokens, giving correct counts from the start.
+
+        :param left: current left input on the main chain
+        :param earlier: conditions already compiled on the main chain
+        :param group: the NCC group to compile
+        :see: Doorenbos §2.8
+        """
+        ncc_node = NccNode(owner_length=len(earlier), left_input=left)
+        partner = NccPartnerNode(ncc_node=ncc_node)
+        ncc_node.partner = partner
+        sub_last = self._build_ncc_subnetwork(left, earlier, group)
+        sub_last.children.append(partner)
+        partner.sub_last_join = sub_last
+        if isinstance(left, BetaMemory):
+            left.successors.append(ncc_node)
+        sub_last.update_child(partner)
+        for token in left.items:
+            ncc_node.left_activate(token)
+        return ncc_node
+
+    def _build_ncc_subnetwork(
+        self,
+        left: BetaMemory | DummyTopNode,
+        earlier: list[Condition],
+        group: NccGroup,
+    ) -> JoinNode:
+        """Build the positive join-node chain for the NCC *group*'s subnetwork.
+
+        :param left: the same left input as the NCC node (parallel branch)
+        :param earlier: conditions from the main chain (variables accessible in group)
+        :param group: the NCC group supplying the subnetwork conditions
+        :returns: the last join node in the subnetwork
+        """
+        sub_left: BetaMemory | DummyTopNode = left
+        sub_earlier = list(earlier)
+        sub_last: JoinNode | None = None
+        for i, cond in enumerate(group.conditions):
+            am = self.root.build_or_share_alpha_memory(cond)
+            tests = JoinTest.extract(cond, sub_earlier)
+            sub_last = self._build_or_share_join_node(sub_left, am, tests)
+            sub_earlier.append(cond)
+            if i < len(group.conditions) - 1:
+                sub_left = self._build_or_share_beta_memory(sub_last)
+        return sub_last
 
     def _build_or_share_join_node(
         self,
@@ -192,11 +267,11 @@ class ReteNetwork:
         )
 
     def _build_or_share_beta_memory(
-        self, parent_join: JoinNode | NegativeJoinNode
+        self, parent_join: JoinNode | NegativeJoinNode | NccNode
     ) -> BetaMemory:
         """Return the existing BetaMemory child of *parent_join* or create one.
 
-        :param parent_join: the upstream join node
+        :param parent_join: the upstream join or NCC node
         :see: Doorenbos §2.6 ``build-or-share-beta-memory``
         """
         for child in parent_join.children:
@@ -237,6 +312,23 @@ class ReteNetwork:
             njn.left_input.successors.remove(njn)
             self._gc_beta_memory(njn.left_input)
 
+    def _gc_ncc_node(self, ncc: NccNode) -> None:
+        """Remove *ncc* from the network if it has no remaining children.
+
+        Also unlinks the partner from the subnetwork and GCs the subnetwork.
+
+        :param ncc: the NCC node to potentially garbage-collect
+        """
+        if ncc.children:
+            return
+        if isinstance(ncc.left_input, BetaMemory):
+            ncc.left_input.successors.remove(ncc)
+            self._gc_beta_memory(ncc.left_input)
+        partner = ncc.partner
+        if partner and partner.sub_last_join:
+            partner.sub_last_join.children.remove(partner)
+            self._gc_join_node(partner.sub_last_join)
+
     def _gc_beta_memory(self, bm: BetaMemory) -> None:
         """Remove *bm* from the network if it has no remaining successors.
 
@@ -250,5 +342,7 @@ class ReteNetwork:
         bm.parent_join.children.remove(bm)
         if isinstance(bm.parent_join, NegativeJoinNode):
             self._gc_negative_join_node(bm.parent_join)
+        elif isinstance(bm.parent_join, NccNode):
+            self._gc_ncc_node(bm.parent_join)
         else:
             self._gc_join_node(bm.parent_join)
