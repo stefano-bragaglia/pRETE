@@ -13,22 +13,6 @@ from rete.network import ReteNetwork
 from rete.wme import WME
 
 
-def fifo_strategy(conflict_set: list[Instantiation]) -> Instantiation:
-    """Return the oldest (first-added) instantiation.
-
-    :param conflict_set: the current conflict set
-    """
-    return conflict_set[0]
-
-
-def recency_strategy(conflict_set: list[Instantiation]) -> Instantiation:
-    """Return the most recently added instantiation.
-
-    :param conflict_set: the current conflict set
-    """
-    return conflict_set[-1]
-
-
 @dataclass
 class InferenceEngine:
     """Wraps :class:`ReteNetwork` with a select-and-fire loop.
@@ -41,8 +25,24 @@ class InferenceEngine:
 
     network: ReteNetwork = field(default_factory=ReteNetwork)
     strategy: Callable[[list[Instantiation]], Instantiation] = field(
-        default_factory=lambda: recency_strategy
+        default_factory=lambda: InferenceEngine.recency_strategy
     )
+
+    @staticmethod
+    def fifo_strategy(conflict_set: list[Instantiation]) -> Instantiation:
+        """Return the oldest (first-added) instantiation.
+
+        :param conflict_set: the current conflict set
+        """
+        return conflict_set[0]
+
+    @staticmethod
+    def recency_strategy(conflict_set: list[Instantiation]) -> Instantiation:
+        """Return the most recently added instantiation.
+
+        :param conflict_set: the current conflict set
+        """
+        return conflict_set[-1]
 
     # ------------------------------------------------------------------
     # Passthrough delegates

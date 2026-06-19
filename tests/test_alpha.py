@@ -6,7 +6,6 @@ from rete.alpha import (
     AlphaMemory,
     AlphaNode,
     RootNode,
-    build_or_share_alpha_node,
 )
 from rete.condition import WILDCARD, Condition
 from rete.wme import WME
@@ -132,7 +131,7 @@ def test_root_node_fans_out_to_all_children():
 
 def test_build_or_share_creates_new_node():
     root = RootNode()
-    node = build_or_share_alpha_node(root, "attribute", "color")
+    node = AlphaNode.build_or_share(root, "attribute", "color")
     assert node in root.children
     assert node.field == "attribute"
     assert node.symbol == "color"
@@ -140,16 +139,16 @@ def test_build_or_share_creates_new_node():
 
 def test_build_or_share_reuses_existing_node():
     root = RootNode()
-    n1 = build_or_share_alpha_node(root, "attribute", "color")
-    n2 = build_or_share_alpha_node(root, "attribute", "color")
+    n1 = AlphaNode.build_or_share(root, "attribute", "color")
+    n2 = AlphaNode.build_or_share(root, "attribute", "color")
     assert n1 is n2
     assert len(root.children) == 1
 
 
 def test_build_or_share_different_symbol_creates_new():
     root = RootNode()
-    n1 = build_or_share_alpha_node(root, "attribute", "color")
-    n2 = build_or_share_alpha_node(root, "attribute", "size")
+    n1 = AlphaNode.build_or_share(root, "attribute", "color")
+    n2 = AlphaNode.build_or_share(root, "attribute", "size")
     assert n1 is not n2
     assert len(root.children) == 2
 

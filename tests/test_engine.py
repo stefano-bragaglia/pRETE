@@ -4,7 +4,7 @@
 """
 from rete.beta import Instantiation, PNode
 from rete.condition import Condition, Production
-from rete.engine import InferenceEngine, fifo_strategy, recency_strategy
+from rete.engine import InferenceEngine
 from rete.wme import Token, WME
 
 
@@ -116,7 +116,7 @@ def test_fifo_strategy():
         Instantiation(production=_prod([]), token=Token()),
     ]
     first = cs[0]
-    assert fifo_strategy(cs) is first
+    assert InferenceEngine.fifo_strategy(cs) is first
 
 
 def test_recency_strategy():
@@ -125,7 +125,7 @@ def test_recency_strategy():
         Instantiation(production=_prod([]), token=Token()),
     ]
     last = cs[-1]
-    assert recency_strategy(cs) is last
+    assert InferenceEngine.recency_strategy(cs) is last
 
 
 def test_custom_strategy():
