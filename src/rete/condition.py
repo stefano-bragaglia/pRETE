@@ -53,6 +53,18 @@ class Condition:
             or test == value
         )
 
+    def alpha_tests(self) -> list[tuple[str, str]]:
+        """Return ``(field, symbol)`` pairs for each constant field in this condition.
+
+        :see: Doorenbos §2.2
+        """
+        all_tests = [
+            ("id", self.id_test),
+            ("attribute", self.attribute_test),
+            ("value", self.value_test),
+        ]
+        return [(f, s) for f, s in all_tests if self._is_constant(s)]  # type: ignore[return-value]
+
     def matches(self, wme: WME) -> bool:
         """Return ``True`` iff all constant tests in this condition pass for ``wme``.
 

@@ -154,12 +154,7 @@ class RootNode:
         :returns: the :class:`AlphaMemory` at the end of the chain
         :see: Doorenbos §2.2
         """
-        tests = [
-            ("id", condition.id_test),
-            ("attribute", condition.attribute_test),
-            ("value", condition.value_test),
-        ]
-        constants = [(f, s) for f, s in tests if Condition._is_constant(s)]
+        constants = condition.alpha_tests()
 
         if not constants:
             # ponytail: all-wildcard/variable — memory lives directly on root

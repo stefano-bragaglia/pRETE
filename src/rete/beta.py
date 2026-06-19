@@ -251,6 +251,16 @@ class JoinNode(BaseJoinNode):
                 self.left_input.successors.remove(self)
             self.left_unlinked = True
 
+    def _retract_extended(self, token: Token) -> None:
+        """Retract all child tokens that extend *token*.
+
+        :param token: the partial match whose extensions are being cleaned up
+        """
+        for child in self.children:
+            for extended in list(child.items):
+                if extended.wmes[:-1] == token.wmes:
+                    child.left_retract(extended)
+
     def left_retract(self, token: Token) -> None:
         """Handle removal of a token from the beta memory.
 
@@ -258,10 +268,7 @@ class JoinNode(BaseJoinNode):
 
         :param token: the partial match being retracted
         """
-        for child in self.children:
-            for extended in list(child.items):
-                if extended.wmes[:-1] == token.wmes:
-                    child.left_retract(extended)
+        self._retract_extended(token)
         if not self.left_input.items and not self.right_unlinked:
             self.alpha_memory.successors.remove(self)
             self.right_unlinked = True
@@ -356,6 +363,13 @@ class NegativeJoinNode(BaseJoinNode):
                     for child in self.children:
                         child.left_activate(neg_tok.token)
 
+    def _find_neg_tok(self, token: Token) -> NegativeToken:
+        """Return the :class:`NegativeToken` whose ``.token`` is *token*.
+
+        :param token: the left-input token to look up
+        """
+        return next(nt for nt in self.items if nt.token is token)
+
     def left_retract(self, token: Token) -> None:
         """Handle removal of a token from the left input.
 
@@ -363,7 +377,7 @@ class NegativeJoinNode(BaseJoinNode):
 
         :param token: the partial match being retracted
         """
-        neg_tok = next(nt for nt in self.items if nt.token is token)
+        neg_tok = self._find_neg_tok(token)
         if neg_tok.count == 0:
             for child in self.children:
                 child.left_retract(token)
