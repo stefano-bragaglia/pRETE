@@ -34,3 +34,6 @@ xenon --max-absolute A --max-modules A --max-average A src/ tests/
 ruff check src/ tests/
 pytest --cov
 ```
+
+## History
+- ***v1.0.0:*** supports triples
