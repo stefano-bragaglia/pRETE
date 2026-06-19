@@ -72,6 +72,11 @@ class _Recorder:
         self.retracted.append(token)
 
 
+def _any_am() -> AlphaMemory:
+    """Return an AlphaMemory that accepts any Fact (used in isolated node tests)."""
+    return AlphaMemory(type_=object, predicate=lambda _: True)
+
+
 def _color_pattern(**kw) -> Pattern:
     """Return a Pattern for Color with optional bindings/join_tests."""
     return Pattern(Color, **kw)
@@ -79,7 +84,7 @@ def _color_pattern(**kw) -> Pattern:
 
 def _make_join(tests=None, left=None, pattern=None):
     """Return ``(JoinNode, AlphaMemory, downstream BetaMemory)``."""
-    am = AlphaMemory()
+    am = _any_am()
     beta = left if left is not None else BetaMemory()
     child = BetaMemory()
     jn = JoinNode(
@@ -327,7 +332,7 @@ def test_join_node_merges_parent_bindings():
 def test_update_child_emits_bindings():
     p = Pattern(Color, bindings=(("$color", "color"),))
     f = Fact(Color("b1", "red"))
-    am = AlphaMemory()
+    am = _any_am()
     am.items.append(f)
     top = DummyTopNode()
     child = BetaMemory()
@@ -397,8 +402,8 @@ def test_join_node_left_retract_no_match():
 
 
 def test_two_join_nodes_chain():
-    am1 = AlphaMemory()
-    am2 = AlphaMemory()
+    am1 = _any_am()
+    am2 = _any_am()
     bm1 = BetaMemory()
     bm2 = BetaMemory()
     top = DummyTopNode()
@@ -499,7 +504,7 @@ def test_join_node_with_pnode_child_right_activate():
     p = _make_production()
     cs: list[Instantiation] = []
     pn = PNode(production=p, conflict_set=cs)
-    am = AlphaMemory()
+    am = _any_am()
     jn = JoinNode(children=[pn], alpha_memory=am, left_input=DummyTopNode(), tests=[])
     f = Fact(Color("b1", "red"))
     jn.right_activate(f)
@@ -512,7 +517,7 @@ def test_join_node_with_pnode_child_right_retract():
     p = _make_production()
     cs: list[Instantiation] = []
     pn = PNode(production=p, conflict_set=cs)
-    am = AlphaMemory()
+    am = _any_am()
     jn = JoinNode(children=[pn], alpha_memory=am, left_input=DummyTopNode(), tests=[])
     f = Fact(Color("b1", "red"))
     jn.right_activate(f)
@@ -527,8 +532,8 @@ def test_join_node_with_pnode_child_right_retract():
 
 
 def test_chain_retract_fact_cascades():
-    am1 = AlphaMemory()
-    am2 = AlphaMemory()
+    am1 = _any_am()
+    am2 = _any_am()
     bm1 = BetaMemory()
     bm2 = BetaMemory()
     top = DummyTopNode()
@@ -567,7 +572,7 @@ def test_negative_token_default_count():
 
 def _make_njn(tests=None, left=None):
     """Return ``(NegativeJoinNode, AlphaMemory, _Recorder)``."""
-    am = AlphaMemory()
+    am = _any_am()
     rec = _Recorder()
     njn = NegativeJoinNode(
         children=[rec],
