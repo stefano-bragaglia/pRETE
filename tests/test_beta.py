@@ -8,7 +8,6 @@ from rete.beta import (
     DummyTopNode,
     JoinNode,
     JoinTest,
-    extract_join_tests,
 )
 from rete.condition import WILDCARD, Condition
 from rete.wme import Token, WME
@@ -111,23 +110,23 @@ def test_beta_memory_multiple_tokens():
 
 def test_extract_join_tests_no_variables():
     cond = Condition("b1", "color", "red")
-    assert extract_join_tests(cond, []) == []
+    assert JoinTest.extract(cond, []) == []
 
 
 def test_extract_join_tests_wildcard():
     cond = Condition(WILDCARD, "color", WILDCARD)
-    assert extract_join_tests(cond, [Condition("b1", "size", "large")]) == []
+    assert JoinTest.extract(cond, [Condition("b1", "size", "large")]) == []
 
 
 def test_extract_join_tests_unbound_variable():
     cond = Condition("?x", "color", "red")
-    assert extract_join_tests(cond, []) == []
+    assert JoinTest.extract(cond, []) == []
 
 
 def test_extract_join_tests_single_match_same_field():
     earlier = [Condition("?x", "color", "red")]
     cond = Condition("?x", "size", "large")
-    tests = extract_join_tests(cond, earlier)
+    tests = JoinTest.extract(cond, earlier)
     assert tests == [
         JoinTest(field_of_wme="id", condition_index=0, field_of_token_wme="id")
     ]
@@ -137,7 +136,7 @@ def test_extract_join_tests_single_match_different_fields():
     # ?v first appears as value_test; new condition uses it as id_test
     earlier = [Condition("b1", "color", "?v")]
     cond = Condition("?v", "size", "large")
-    tests = extract_join_tests(cond, earlier)
+    tests = JoinTest.extract(cond, earlier)
     assert tests == [
         JoinTest(field_of_wme="id", condition_index=0, field_of_token_wme="value")
     ]
@@ -150,7 +149,7 @@ def test_extract_join_tests_two_occurrences():
         Condition("?x", "size", "large"),
     ]
     cond = Condition("?x", "weight", "heavy")
-    tests = extract_join_tests(cond, earlier)
+    tests = JoinTest.extract(cond, earlier)
     assert tests == [
         JoinTest(field_of_wme="id", condition_index=0, field_of_token_wme="id"),
         JoinTest(field_of_wme="id", condition_index=1, field_of_token_wme="id"),
@@ -164,7 +163,7 @@ def test_extract_join_tests_partial_earlier_match():
         Condition("b2", "size", "large"),  # ?x absent here
     ]
     cond = Condition("?x", "weight", "heavy")
-    tests = extract_join_tests(cond, earlier)
+    tests = JoinTest.extract(cond, earlier)
     assert tests == [
         JoinTest(field_of_wme="id", condition_index=0, field_of_token_wme="id")
     ]
@@ -174,7 +173,7 @@ def test_extract_join_tests_two_variables():
     # Two distinct variables each bound in an earlier condition
     earlier = [Condition("?x", "?y", "red")]
     cond = Condition("?x", "?y", "blue")
-    tests = extract_join_tests(cond, earlier)
+    tests = JoinTest.extract(cond, earlier)
     assert JoinTest("id", 0, "id") in tests
     assert JoinTest("attribute", 0, "attribute") in tests
 

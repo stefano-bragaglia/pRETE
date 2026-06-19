@@ -25,6 +25,67 @@ class JoinTest:
     condition_index: int
     field_of_token_wme: str
 
+    @classmethod
+    def extract(
+        cls,
+        condition: Condition,
+        earlier_conditions: list[Condition],
+    ) -> list[JoinTest]:
+        """Extract variable-consistency tests for *condition*.
+
+        For each ``'?'``-prefixed variable in *condition*, find its bindings
+        in *earlier_conditions* and emit one :class:`JoinTest` per match.
+
+        :param condition: the condition being compiled
+        :param earlier_conditions: all preceding conditions in the LHS (ordered)
+        :returns: list of :class:`JoinTest`; empty if no shared variables
+        :see: Doorenbos §2.4
+        """
+        tests: list[JoinTest] = []
+        for fname, val in [
+            ("id", condition.id_test),
+            ("attribute", condition.attribute_test),
+            ("value", condition.value_test),
+        ]:
+            if isinstance(val, str) and val.startswith("?"):
+                tests.extend(cls._tests_for_variable(val, fname, earlier_conditions))
+        return tests
+
+    @staticmethod
+    def _variable_binding(var: str, condition: Condition) -> str | None:
+        """Return the field name where *var* appears in *condition*, or ``None``.
+
+        :param var: a ``'?'``-prefixed variable name
+        :param condition: the condition to search
+        """
+        for fname, val in [
+            ("id", condition.id_test),
+            ("attribute", condition.attribute_test),
+            ("value", condition.value_test),
+        ]:
+            if val == var:
+                return fname
+        return None
+
+    @staticmethod
+    def _tests_for_variable(
+        var: str,
+        field_of_wme: str,
+        earlier: list[Condition],
+    ) -> list[JoinTest]:
+        """Emit one :class:`JoinTest` per earlier condition that binds *var*.
+
+        :param var: the variable to look up
+        :param field_of_wme: the field in the new WME where *var* appears
+        :param earlier: conditions preceding the current one in the LHS
+        """
+        tests: list[JoinTest] = []
+        for i, cond in enumerate(earlier):
+            f = JoinTest._variable_binding(var, cond)
+            if f is not None:
+                tests.append(JoinTest(field_of_wme, i, f))
+        return tests
+
 
 @dataclass
 class BetaMemory:
@@ -161,61 +222,3 @@ class JoinNode:
         return bool(token.wmes) and token.wmes[-1] is wme
 
 
-def _variable_binding(var: str, condition: Condition) -> str | None:
-    """Return the field name where *var* appears in *condition*, or ``None``.
-
-    :param var: a ``'?'``-prefixed variable name
-    :param condition: the condition to search
-    """
-    for fname, val in [
-        ("id", condition.id_test),
-        ("attribute", condition.attribute_test),
-        ("value", condition.value_test),
-    ]:
-        if val == var:
-            return fname
-    return None
-
-
-def _tests_for_variable(
-    var: str,
-    field_of_wme: str,
-    earlier: list[Condition],
-) -> list[JoinTest]:
-    """Emit one :class:`JoinTest` per earlier condition that binds *var*.
-
-    :param var: the variable to look up
-    :param field_of_wme: the field in the new WME where *var* appears
-    :param earlier: conditions preceding the current one in the LHS
-    """
-    tests: list[JoinTest] = []
-    for i, cond in enumerate(earlier):
-        f = _variable_binding(var, cond)
-        if f is not None:
-            tests.append(JoinTest(field_of_wme, i, f))
-    return tests
-
-
-def extract_join_tests(
-    condition: Condition,
-    earlier_conditions: list[Condition],
-) -> list[JoinTest]:
-    """Extract variable-consistency :class:`JoinTest` objects for *condition*.
-
-    For each ``'?'``-prefixed variable in *condition*, find its bindings in
-    *earlier_conditions* and emit a :class:`JoinTest` for each.
-
-    :param condition: the condition being compiled
-    :param earlier_conditions: all preceding conditions in the LHS (ordered)
-    :returns: list of :class:`JoinTest` objects; empty if no shared variables
-    :see: Doorenbos §2.4
-    """
-    tests: list[JoinTest] = []
-    for fname, val in [
-        ("id", condition.id_test),
-        ("attribute", condition.attribute_test),
-        ("value", condition.value_test),
-    ]:
-        if isinstance(val, str) and val.startswith("?"):
-            tests.extend(_tests_for_variable(val, fname, earlier_conditions))
-    return tests
