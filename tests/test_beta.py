@@ -157,6 +157,19 @@ def test_extract_join_tests_two_occurrences():
     ]
 
 
+def test_extract_join_tests_partial_earlier_match():
+    # ?x in one earlier condition but not the other → only one JoinTest
+    earlier = [
+        Condition("?x", "color", "red"),
+        Condition("b2", "size", "large"),  # ?x absent here
+    ]
+    cond = Condition("?x", "weight", "heavy")
+    tests = extract_join_tests(cond, earlier)
+    assert tests == [
+        JoinTest(field_of_wme="id", condition_index=0, field_of_token_wme="id")
+    ]
+
+
 def test_extract_join_tests_two_variables():
     # Two distinct variables each bound in an earlier condition
     earlier = [Condition("?x", "?y", "red")]
