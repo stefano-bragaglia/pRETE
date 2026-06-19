@@ -90,12 +90,6 @@ class Pattern:
         return (self.type_, tuple(id(t) for t in self.alpha_tests))
 
 
-# ponytail: backward-compat alias; removed in Step 7 when __init__.py is cleaned up
-Condition = Pattern
-
-# ponytail: still imported by alpha/beta/network test files; removed in Step 7
-WILDCARD: object = object()
-
 
 @dataclass(frozen=True)
 class NccGroup:

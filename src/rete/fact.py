@@ -27,9 +27,6 @@ class Fact:
     beta_tokens: list[tuple[Token, LeftNode]] = field(default_factory=list, repr=False)
 
 
-# ponytail: temporary alias; removed in Step 7 when __init__.py is cleaned up
-WME = Fact
-
 
 @dataclass
 class Token:
