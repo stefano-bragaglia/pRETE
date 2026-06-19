@@ -99,7 +99,7 @@ class BetaMemory:
 
     items: list[Token] = field(default_factory=list)
     successors: list = field(default_factory=list, repr=False)
-    parent_join: JoinNode | None = field(default=None, repr=False)
+    parent_join: JoinNode | NegativeJoinNode | None = field(default=None, repr=False)
 
     def left_activate(self, token: Token) -> None:
         """Store *token* and notify downstream join nodes.
@@ -230,6 +230,121 @@ class JoinNode:
 
 
 @dataclass
+class NegativeToken:
+    """Pairs a left-input token with its count of blocking right WMEs.
+
+    :see: Doorenbos §2.7
+    """
+
+    token: Token
+    count: int = 0
+
+
+@dataclass
+class NegativeJoinNode:
+    """Negated join node: propagates a token downstream only while count is zero.
+
+    On WME add the count of matching tokens is incremented (possibly retracting
+    tokens); on WME remove the count is decremented (possibly re-asserting them).
+
+    :see: Forgy §2.3, Doorenbos §2.7
+    """
+
+    children: list = field(default_factory=list, repr=False)
+    alpha_memory: AlphaMemory = field(default_factory=AlphaMemory)
+    left_input: BetaMemory | DummyTopNode = field(default_factory=DummyTopNode)
+    tests: list[JoinTest] = field(default_factory=list)
+    items: list[NegativeToken] = field(default_factory=list)
+
+    def left_activate(self, token: Token) -> None:
+        """Handle a new token from the left input.
+
+        :param token: the partial match entering from the left
+        """
+        count = self._count_matches(token)
+        neg_tok = NegativeToken(token=token, count=count)
+        self.items.append(neg_tok)
+        if count == 0:
+            for child in self.children:
+                child.left_activate(token)
+
+    def right_activate(self, wme: WME) -> None:
+        """Handle a new WME arriving in the alpha memory (right input).
+
+        :param wme: the WME that just entered the alpha memory
+        """
+        for neg_tok in self.items:
+            if self._passes_tests(neg_tok.token, wme):
+                if neg_tok.count == 0:
+                    for child in self.children:
+                        child.left_retract(neg_tok.token)
+                neg_tok.count += 1
+
+    def right_retract(self, wme: WME) -> None:
+        """Handle removal of a WME from the alpha memory.
+
+        :param wme: the WME being retracted
+        """
+        for neg_tok in self.items:
+            if self._passes_tests(neg_tok.token, wme):
+                neg_tok.count -= 1
+                if neg_tok.count == 0:
+                    for child in self.children:
+                        child.left_activate(neg_tok.token)
+
+    def left_retract(self, token: Token) -> None:
+        """Handle removal of a token from the left input.
+
+        :param token: the partial match being retracted
+        """
+        neg_tok = next(nt for nt in self.items if nt.token is token)
+        if neg_tok.count == 0:
+            for child in self.children:
+                child.left_retract(token)
+        self.items.remove(neg_tok)
+
+    def update_child(self, child: object) -> None:
+        """Seed *child* with all currently propagated tokens (count == 0).
+
+        :param child: a newly attached downstream node
+        :see: Doorenbos §2.6 ``update-new-node-with-matches-from-above``
+        """
+        for neg_tok in self.items:
+            if neg_tok.count == 0:
+                child.left_activate(neg_tok.token)
+
+    def _count_matches(self, token: Token) -> int:
+        """Count WMEs in the alpha memory that pass all join tests for *token*.
+
+        :param token: the left-input token to test against
+        """
+        return sum(
+            1 for wme in self.alpha_memory.items if self._passes_tests(token, wme)
+        )
+
+    def _passes_tests(self, token: Token, wme: WME) -> bool:
+        """Return ``True`` iff *wme* is consistent with *token* for all join tests.
+
+        :param token: existing partial match
+        :param wme: candidate WME to test
+        """
+        for test in self.tests:
+            wme_val = getattr(wme, test.field_of_wme)
+            tok_val = getattr(token.wmes[test.condition_index], test.field_of_token_wme)
+            if wme_val != tok_val:
+                return False
+        return True
+
+    def _initialize_from(self, tokens: object) -> None:
+        """Seed this node by left-activating each token in *tokens*.
+
+        :param tokens: an iterable of :class:`Token` objects
+        """
+        for t in tokens:
+            self.left_activate(t)
+
+
+@dataclass
 class Instantiation:
     """A production–token pair representing one full match in the conflict set.
 
@@ -255,7 +370,7 @@ class PNode:
     production: Production
     conflict_set: list[Instantiation]
     items: list[Token] = field(default_factory=list)
-    parent_join: JoinNode | None = field(default=None, repr=False)
+    parent_join: JoinNode | NegativeJoinNode | None = field(default=None, repr=False)
 
     def left_activate(self, token: Token) -> None:
         """Record a full match.

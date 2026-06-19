@@ -20,13 +20,16 @@ class Condition:
 
     Each field is a string constant, a ``'?'``-prefixed variable name, or
     ``WILDCARD``. Variable binding is resolved by join nodes (Phase 3).
+    When ``negated`` is ``True`` the condition must *not* be satisfied by
+    any WME in working memory for the production to fire (Doorenbos §2.7).
 
-    :see: Doorenbos §2.1
+    :see: Doorenbos §2.1, §2.7
     """
 
     id_test: object
     attribute_test: object
     value_test: object
+    negated: bool = False
 
     @staticmethod
     def _field_matches(test: object, value: str) -> bool:

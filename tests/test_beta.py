@@ -1,6 +1,6 @@
-"""Unit tests for beta.py — JoinTest, BetaMemory, DummyTopNode, JoinNode, PNode.
+"""Unit tests for beta.py — positive and negative join nodes.
 
-:see: Doorenbos §2.4, §2.6
+:see: Doorenbos §2.4, §2.6, §2.7
 """
 from rete.alpha import AlphaMemory
 from rete.beta import (
@@ -9,6 +9,8 @@ from rete.beta import (
     Instantiation,
     JoinNode,
     JoinTest,
+    NegativeJoinNode,
+    NegativeToken,
     PNode,
 )
 from rete.condition import WILDCARD, Condition, Production
@@ -469,3 +471,177 @@ def test_chain_retract_wme_cascades():
     am1.deactivate(w1)
     assert bm1.items == []
     assert bm2.items == []
+
+
+# ---------------------------------------------------------------------------
+# NegativeToken
+# ---------------------------------------------------------------------------
+
+
+def test_negative_token_default_count():
+    nt = NegativeToken(token=Token())
+    assert nt.count == 0
+
+
+# ---------------------------------------------------------------------------
+# NegativeJoinNode helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_njn(tests=None, left=None):
+    """Return ``(NegativeJoinNode, AlphaMemory, _Recorder)``."""
+    am = AlphaMemory()
+    rec = _Recorder()
+    njn = NegativeJoinNode(
+        children=[rec],
+        alpha_memory=am,
+        left_input=left if left is not None else DummyTopNode(),
+        tests=tests or [],
+    )
+    return njn, am, rec
+
+
+# ---------------------------------------------------------------------------
+# NegativeJoinNode — left_activate
+# ---------------------------------------------------------------------------
+
+
+def test_njn_left_activate_empty_alpha_propagates():
+    njn, _am, rec = _make_njn()
+    t = Token()
+    njn.left_activate(t)
+    assert rec.activated == [t]
+    assert njn.items[0].count == 0
+
+
+def test_njn_left_activate_matching_wme_blocks():
+    njn, am, rec = _make_njn()
+    am.items.append(WME("b1", "color", "red"))
+    t = Token()
+    njn.left_activate(t)
+    assert rec.activated == []
+    assert njn.items[0].count == 1
+
+
+def test_njn_left_activate_nonmatching_wme_propagates():
+    # WME in alpha but join test fails → count stays 0 → propagates.
+    w_prev = WME("block1", "color", "red")
+    w_right = WME("block2", "size", "large")
+    bm = BetaMemory(items=[Token(wmes=(w_prev,))])
+    test = JoinTest(field_of_wme="id", condition_index=0, field_of_token_wme="id")
+    njn, am, rec = _make_njn(tests=[test], left=bm)
+    am.items.append(w_right)  # id "block2" ≠ token id "block1" → test fails
+    t = Token(wmes=(w_prev,))
+    njn.left_activate(t)
+    assert rec.activated == [t]
+    assert njn.items[0].count == 0
+
+
+# ---------------------------------------------------------------------------
+# NegativeJoinNode — right_activate
+# ---------------------------------------------------------------------------
+
+
+def test_njn_right_activate_retracts_when_count_zero():
+    njn, am, rec = _make_njn()
+    t = Token()
+    njn.left_activate(t)   # count 0 → propagated
+    assert rec.activated == [t]
+    w = WME("b1", "color", "red")
+    njn.right_activate(w)
+    assert rec.retracted == [t]
+    assert njn.items[0].count == 1
+
+
+def test_njn_right_activate_no_retract_when_already_blocked():
+    njn, am, rec = _make_njn()
+    am.items.append(WME("b1", "color", "red"))
+    t = Token()
+    njn.left_activate(t)   # count 1 → blocked
+    rec.retracted.clear()
+    w2 = WME("b2", "size", "large")
+    njn.right_activate(w2)  # count now 2 → no retract
+    assert rec.retracted == []
+    assert njn.items[0].count == 2
+
+
+def test_njn_right_activate_increments_count():
+    njn, am, rec = _make_njn()
+    t = Token()
+    njn.left_activate(t)
+    w = WME("b1", "color", "red")
+    njn.right_activate(w)
+    assert njn.items[0].count == 1
+
+
+# ---------------------------------------------------------------------------
+# NegativeJoinNode — right_retract
+# ---------------------------------------------------------------------------
+
+
+def test_njn_right_retract_asserts_when_count_reaches_zero():
+    njn, am, rec = _make_njn()
+    w = WME("b1", "color", "red")
+    am.items.append(w)
+    t = Token()
+    njn.left_activate(t)   # count 1 → blocked
+    rec.activated.clear()
+    njn.right_retract(w)   # count → 0 → assert
+    assert rec.activated == [t]
+    assert njn.items[0].count == 0
+
+
+def test_njn_right_retract_no_assert_when_count_stays_positive():
+    njn, am, rec = _make_njn()
+    w1 = WME("b1", "color", "red")
+    w2 = WME("b2", "size", "large")
+    am.items.extend([w1, w2])
+    t = Token()
+    njn.left_activate(t)   # count 2 → blocked
+    rec.activated.clear()
+    njn.right_retract(w1)  # count → 1 → still blocked
+    assert rec.activated == []
+    assert njn.items[0].count == 1
+
+
+# ---------------------------------------------------------------------------
+# NegativeJoinNode — left_retract
+# ---------------------------------------------------------------------------
+
+
+def test_njn_left_retract_propagated_token():
+    njn, am, rec = _make_njn()
+    t = Token()
+    njn.left_activate(t)   # count 0 → propagated
+    assert rec.activated == [t]
+    njn.left_retract(t)
+    assert rec.retracted == [t]
+    assert njn.items == []
+
+
+def test_njn_left_retract_blocked_token():
+    njn, am, rec = _make_njn()
+    am.items.append(WME("b1", "color", "red"))
+    t = Token()
+    njn.left_activate(t)   # count 1 → blocked
+    njn.left_retract(t)
+    assert rec.retracted == []
+    assert njn.items == []
+
+
+# ---------------------------------------------------------------------------
+# NegativeJoinNode — update_child
+# ---------------------------------------------------------------------------
+
+
+def test_njn_update_child_only_sends_propagated():
+    njn, am, _rec = _make_njn()
+    # seed one propagated (count 0) and one blocked (count 1) item directly
+    t0 = Token()
+    t1 = Token(wmes=(WME("b1", "color", "red"),))
+    njn.items.append(NegativeToken(token=t0, count=0))
+    njn.items.append(NegativeToken(token=t1, count=1))
+    new_child = _Recorder()
+    njn.update_child(new_child)
+    assert new_child.activated == [t0]
+    assert new_child.retracted == []

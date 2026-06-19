@@ -364,3 +364,100 @@ def test_remove_wme_idempotent_after_retract():
     net.add_wme(w)
     net.remove_wme(w)
     assert net.conflict_set == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — negated conditions (Doorenbos §2.7)
+# ---------------------------------------------------------------------------
+
+
+def test_negated_only_condition_fires_with_no_wme():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red", negated=True)]))
+    assert len(net.conflict_set) == 1
+
+
+def test_negated_only_condition_blocked_by_wme():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red", negated=True)]))
+    net.add_wme(WME("b1", "color", "red"))
+    assert net.conflict_set == []
+
+
+def test_negated_condition_blocking_then_retracted():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red", negated=True)]))
+    w = WME("b1", "color", "red")
+    net.add_wme(w)
+    assert net.conflict_set == []
+    net.remove_wme(w)
+    assert len(net.conflict_set) == 1
+
+
+def test_positive_then_negated_condition_fires():
+    net = ReteNetwork()
+    net.add_production(
+        _prod([
+            Condition("b1", "color", "red"),
+            Condition("b1", "size", "large", negated=True),
+        ])
+    )
+    net.add_wme(WME("b1", "color", "red"))
+    assert len(net.conflict_set) == 1
+
+
+def test_positive_then_negated_condition_blocked():
+    net = ReteNetwork()
+    net.add_production(
+        _prod([
+            Condition("b1", "color", "red"),
+            Condition("b1", "size", "large", negated=True),
+        ])
+    )
+    net.add_wme(WME("b1", "color", "red"))
+    net.add_wme(WME("b1", "size", "large"))
+    assert net.conflict_set == []
+
+
+def test_positive_then_negated_remove_blocker():
+    net = ReteNetwork()
+    net.add_production(
+        _prod([
+            Condition("b1", "color", "red"),
+            Condition("b1", "size", "large", negated=True),
+        ])
+    )
+    net.add_wme(WME("b1", "color", "red"))
+    w_blocker = WME("b1", "size", "large")
+    net.add_wme(w_blocker)
+    assert net.conflict_set == []
+    net.remove_wme(w_blocker)
+    assert len(net.conflict_set) == 1
+
+
+def test_multiple_blocking_wmes():
+    net = ReteNetwork()
+    net.add_production(_prod([Condition("b1", "color", "red", negated=True)]))
+    w1 = WME("b1", "color", "red")
+    w2 = WME("b1", "color", "red")
+    net.add_wme(w1)
+    net.add_wme(w2)
+    assert net.conflict_set == []
+    net.remove_wme(w1)
+    assert net.conflict_set == []
+    net.remove_wme(w2)
+    assert len(net.conflict_set) == 1
+
+
+def test_negated_condition_gc_on_remove_production():
+    net = ReteNetwork()
+    pn = net.add_production(_prod([Condition("b1", "color", "red", negated=True)]))
+    net.remove_production(pn)
+    assert net.conflict_set == []
+
+
+def test_negated_shares_alpha_memory():
+    net = ReteNetwork()
+    pn_pos = net.add_production(_prod([Condition("b1", "color", "red")]))
+    pn_neg = net.add_production(_prod([Condition("b1", "color", "red", negated=True)]))
+    assert pn_pos.parent_join.alpha_memory is pn_neg.parent_join.alpha_memory
