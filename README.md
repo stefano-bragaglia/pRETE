@@ -3,22 +3,27 @@
 A pure-Python implementation of the Rete algorithm for production rule systems,
 matching over arbitrary Python objects (POPOs — Plain Old Python Objects).
 
-> **v2.0.0 migration:** the `(id, attribute, value)` triple model has been
-> replaced by Drools-style pattern matching over `@dataclass` (or any Python)
-> objects.  `WME`, `Condition`, and `WILDCARD` are removed; use `Fact`,
-> `Pattern`, and `JoinSpec` instead.  See [CHANGELOG.md](CHANGELOG.md).
+> **v2.0.0 breaking change:** the `(id, attribute, value)` triple model has
+> been replaced by Drools-style pattern matching over `@dataclass` objects.
+> `WME`, `Condition`, and `WILDCARD` are removed; use `Fact`, `Pattern`, and
+> `JoinSpec` instead.  See [CHANGELOG.md](CHANGELOG.md).
 
 ![pRETE logo](images/pRETE-logo-small.png)
 
 ## Background
 
 Implements the algorithm from:
-- Forgy, C. L. (1982). Rete: A fast algorithm for the many pattern/many object pattern match problem. *Artificial Intelligence*, 19(1), 17–37.
-- Doorenbos, R. B. (1995). *Production system techniques for large rule bases* (CMU-CS-95-113). Carnegie Mellon University.
+- Forgy, C. L. (1982). Rete: A fast algorithm for the many pattern/many object
+  pattern match problem. *Artificial Intelligence*, 19(1), 17–37.
+- Doorenbos, R. B. (1995). *Production system techniques for large rule bases*
+  (CMU-CS-95-113). Carnegie Mellon University.
 
-v1.x represented working memory elements as `(id, attribute, value)` triples per
-Doorenbos §2.1.  v2.0 replaces triples with Drools-style POPOs: any Python
-object may be a fact; patterns match by type then by callable field tests.
+v1.x represented working memory as `(id, attribute, value)` triples per
+Doorenbos §2.1.  v2.0 follows the Drools model: any Python object may be a
+fact; patterns match by type then by callable field tests; variable bindings
+are named and carried in the token.
+
+---
 
 ## Install
 
@@ -26,180 +31,253 @@ object may be a fact; patterns match by type then by callable field tests.
 pip install -e .[dev]
 ```
 
-## Usage
+---
 
-### Core concepts
+## Core concepts
 
 | Term | What it is |
 |------|-----------|
-| **`Fact(obj)`** | Wraps any Python object as a working-memory element |
-| **`Pattern(type_, alpha_tests, join_tests, bindings, negated)`** | Matches facts by type then by callable field tests |
-| **`JoinSpec(attr_of_fact, var_name)`** | Declares a cross-fact variable reference inside a `Pattern` |
-| **`Production(lhs, rhs)`** | A rule: a list of `Pattern`s / `NccGroup`s (LHS) plus a Python callable (RHS) |
-| **`ReteNetwork`** | The compiled network; call `add_fact` / `remove_fact` / `add_production` |
-| **`InferenceEngine`** | Wraps `ReteNetwork` with a select-and-fire loop (`run()`); adds `update_fact` |
+| `Fact(obj)` | Wraps any Python object as a working-memory element (identity semantics — two `Fact`s wrapping equal objects are distinct) |
+| `Pattern(type_, alpha_tests, join_tests, bindings, negated)` | Matches facts by `isinstance` check then by callable field tests |
+| `JoinSpec(attr_of_fact, var_name)` | Compile-time cross-fact constraint declared inside a `Pattern`; resolved at join time |
+| `Production(lhs, rhs)` | A rule: a list of `Pattern`s / `NccGroup`s and a Python callable that receives the matched `Token` |
+| `Token` | An immutable sequence of matched `Fact`s plus a `bindings: dict[str, Any]` of named variable values |
+| `ReteNetwork` | The compiled network; call `add_fact` / `remove_fact` / `add_production` |
+| `InferenceEngine` | Wraps `ReteNetwork` with a select-and-fire loop; adds `update_fact` |
 
-Variable names start with `$`.  A variable binds to an object field on its first
-match (`bindings` tuple in `Pattern`) and must equal that value in every
-subsequent condition that references it (`join_tests` / `JoinSpec`).
+Variable names start with `$`.  A variable binds to an object attribute on its
+first match (`Pattern.bindings`) and must equal that value in every subsequent
+condition that references it (`Pattern.join_tests` / `JoinSpec`).
 
 ---
 
-### Quick start — basic fact matching
+## Quick start
+
+### Single-pattern rule
 
 ```python
 from dataclasses import dataclass
-from rete import Fact, Pattern, JoinSpec, Production, ReteNetwork
+from rete import Fact, Pattern, Production, ReteNetwork
 
 @dataclass
-class On:
-    upper: str
-    lower: str
+class Temperature:
+    sensor: str
+    value: float
 
-def on_table(obj: On) -> bool:
-    return obj.lower == "table"
+def too_hot(obj: Temperature) -> bool:
+    return obj.value >= 80.0
 
 net = ReteNetwork()
+alarms = []
 
 net.add_production(Production(
-    lhs=[
-        Pattern(On, bindings=(("$lower", "lower"),)),            # bind $lower = On.lower
-        Pattern(On, alpha_tests=(on_table,),                     # alpha: lower == "table"
-                    join_tests=(JoinSpec("upper", "$lower"),)),  # beta:  upper == $lower
-    ],
-    rhs=lambda token: print(token.bindings["$lower"], "is above table"),
+    lhs=[Pattern(Temperature, alpha_tests=(too_hot,),
+                 bindings=(("$sensor", "sensor"),))],
+    rhs=lambda token: alarms.append(token.bindings["$sensor"]),
 ))
 
-net.add_fact(Fact(On("A", "B")))
-net.add_fact(Fact(On("B", "table")))
-net.add_fact(Fact(On("C", "table")))
+net.add_fact(Fact(Temperature("T1", 60.0)))
+net.add_fact(Fact(Temperature("T2", 95.0)))
 
-# One match: A→B→table
 for inst in net.conflict_set:
     inst.production.rhs(inst.token)
-# B is above table
+
+print(alarms)   # ['T2']
 ```
 
----
+### Cross-fact binding
 
-### Negated conditions
-
-Pass `negated=True` to exclude facts that satisfy the pattern.
+Use `bindings` to capture a variable and `JoinSpec` to require it in a later
+pattern.
 
 ```python
+from dataclasses import dataclass
+from rete import Fact, JoinSpec, Pattern, Production, ReteNetwork
+
 @dataclass
 class Color:
     block: str
     color: str
 
-def is_blue(obj: Color) -> bool:
-    return obj.color == "blue"
+@dataclass
+class Size:
+    block: str
+    size: str
+
+def is_red(obj: Color) -> bool:   return obj.color == "red"
+def is_large(obj: Size) -> bool:  return obj.size == "large"
+
+net = ReteNetwork()
 
 net.add_production(Production(
     lhs=[
-        Pattern(On, alpha_tests=(on_table,), bindings=(("$block", "upper"),)),
-        Pattern(Color, alpha_tests=(is_blue,),
+        # bind $block = Color.block
+        Pattern(Color, alpha_tests=(is_red,), bindings=(("$block", "block"),)),
+        # require Size.block == $block
+        Pattern(Size,  alpha_tests=(is_large,),
+                join_tests=(JoinSpec("block", "$block"),)),
+    ],
+    rhs=lambda token: print(f"Block {token.bindings['$block']} is red and large"),
+))
+
+net.add_fact(Fact(Color("B1", "red")))
+net.add_fact(Fact(Size("B1", "large")))
+net.add_fact(Fact(Color("B2", "red")))    # B2 has no matching Size → no match
+
+for inst in net.conflict_set:
+    inst.production.rhs(inst.token)
+# Block B1 is red and large
+```
+
+> **Alpha sharing note:** two `Pattern`s that pass the **same function object**
+> in `alpha_tests` share one alpha memory.  Always use stable, module-level
+> functions — not inline lambdas — when sharing matters.
+
+### Negated conditions
+
+`negated=True` makes the pattern a blocking condition: the rule fires only when
+**no** fact satisfies it.
+
+```python
+@dataclass
+class Marker:
+    block: str
+    key: str
+
+def is_broken(obj: Marker) -> bool:
+    return obj.key == "broken"
+
+net.add_production(Production(
+    lhs=[
+        Pattern(Color, alpha_tests=(is_red,), bindings=(("$block", "block"),)),
+        Pattern(Marker, alpha_tests=(is_broken,),
                 join_tests=(JoinSpec("block", "$block"),), negated=True),
     ],
-    rhs=lambda token: print(token.bindings["$block"], "is on the table and not blue"),
+    rhs=lambda token: print(f"{token.bindings['$block']} is red and not broken"),
 ))
 ```
 
----
-
 ### Negated conjunctive conditions (NCC)
 
-`NccGroup` wraps multiple patterns that must **not** jointly match.
+`NccGroup` wraps several patterns that must **not** jointly match.
 
 ```python
 from rete import NccGroup
+
+net.add_production(Production(
+    lhs=[
+        Pattern(Color, alpha_tests=(is_red,), bindings=(("$block", "block"),)),
+        NccGroup(conditions=(
+            Pattern(Marker, alpha_tests=(is_broken,),
+                    join_tests=(JoinSpec("block", "$block"),)),
+        )),
+    ],
+    rhs=lambda token: print("match"),
+))
 ```
 
-See `src/examples/fraud_detection.py` for a full NCC example.
-
----
+See `src/examples/fraud_detection.py` for a full NCC round-trip example.
 
 ### Retraction
 
 Removing a `Fact` automatically retracts every match that depended on it.
 
 ```python
-f = Fact(On("A", "table"))
+f = Fact(Temperature("T3", 90.0))
 net.add_fact(f)
-# ... rule fires ...
+# ... conflict set has a new entry ...
 net.remove_fact(f)
-# conflict set entry for f is gone
+# conflict set entry is gone
 ```
-
----
 
 ### Mutation — `update_fact`
 
-POPOs are mutable; use `update_fact` to keep the network in sync after
-modifying an object (equivalent to Drools `modify`):
+POPOs are mutable.  Mutate an attribute in place, then call `update_fact` to
+resync the network (equivalent to Drools `modify`).  Object identity is
+preserved across the retract / re-assert cycle.
 
 ```python
-engine.update_fact(fact)   # retract + re-assert; object identity preserved
+engine = InferenceEngine()
+# ... add productions and facts ...
+fact.obj.approved = False   # mutate in place
+engine.update_fact(fact)    # retract → re-assert
+engine.run()
 ```
-
----
 
 ### Inference engine — select-and-fire loop
 
-`InferenceEngine` wraps `ReteNetwork` and fires one instantiation per cycle
-until the conflict set is empty (or a step cap is reached).
+`InferenceEngine` wraps `ReteNetwork` with a `run()` loop.
 
 ```python
-from rete.engine import InferenceEngine
-from rete import Fact, Pattern, Production
+from rete import Fact, InferenceEngine, Pattern, Production
+
+@dataclass
+class Item:
+    name: str
 
 engine = InferenceEngine()
-
-collected = []
+found = []
 
 engine.add_production(Production(
-    lhs=[Pattern(On, alpha_tests=(on_table,), bindings=(("$upper", "upper"),))],
-    rhs=lambda token: collected.append(token.bindings["$upper"]),
+    lhs=[Pattern(Item, bindings=(("$name", "name"),))],
+    rhs=lambda token: found.append(token.bindings["$name"]),
 ))
 
-engine.add_fact(Fact(On("A", "table")))
-engine.add_fact(Fact(On("B", "table")))
+engine.add_fact(Fact(Item("apple")))
+engine.add_fact(Fact(Item("banana")))
 
 fired = engine.run()
-print(f"Fired {fired} rule(s), matched: {sorted(collected)}")
-# Fired 2 rule(s), matched: ['A', 'B']
+print(f"Fired {fired} rule(s): {sorted(found)}")
+# Fired 2 rule(s): ['apple', 'banana']
 ```
 
 The default conflict-resolution strategy is **recency** (last-added wins).
-Pass a custom callable to `InferenceEngine(strategy=...)` to change it; a
-built-in FIFO strategy is available as `InferenceEngine.fifo_strategy`.
+`InferenceEngine.fifo_strategy` is also available; pass any callable as
+`InferenceEngine(strategy=...)` for a custom policy.
+
+---
+
+## MRO dispatch
+
+The alpha network dispatches by `type(fact.obj).__mro__`, so a `Dog` fact
+reaches a `Pattern(type_=Animal)` automatically.  No explicit registration
+needed.
 
 ---
 
 ## Bundled examples
 
 ```bash
-# Doorenbos classics (rewritten with @dataclass facts)
+# Doorenbos classics (v2.0 rewrite with @dataclass facts)
 python src/examples/blocks_world.py      # §2.1 — three-pattern join
 python src/examples/negation.py          # §2.7 — negated condition
 python src/examples/sharing.py           # §2.3 — two productions sharing a beta node
 
-# New non-trivial examples (v2.0)
-python src/examples/loan_application.py  # multi-rule, update_fact, cross-fact binding
+# Non-trivial examples (v2.0)
+python src/examples/loan_application.py  # update_fact; cross-fact binding; _approved guard
 python src/examples/temperature_alarm.py # pure alpha test; RHS inserts new facts
-python src/examples/family_tree.py       # transitive inference via engine.run() chaining
-python src/examples/fraud_detection.py   # NCC group; retraction round-trip
+python src/examples/family_tree.py       # transitive inference via forward chaining
+python src/examples/fraud_detection.py   # NccGroup; retraction round-trip
 ```
+
+---
 
 ## Dev
 
+```bash
+hatch run check   # xenon (complexity A) + ruff + pytest --cov (fail-under 80)
+```
+
+Individual tools:
 ```bash
 xenon --max-absolute A --max-modules A --max-average A src/ tests/
 ruff check src/ tests/
 pytest --cov
 ```
 
+---
+
 ## History
-- ***v2.0.0:*** Drools-style POPO matching — `Fact`, `Pattern`, `JoinSpec`; `update_fact`; MRO dispatch
-- ***v1.0.1:*** incremental fixes
-- ***v1.0.0:*** supports triples (`WME`, `Condition`)
+- **v2.0.0** — Drools-style POPO matching: `Fact`, `Pattern`, `JoinSpec`; `update_fact`; MRO dispatch; named variable bindings on `Token`
+- **v1.0.1** — incremental fixes
+- **v1.0.0** — triple WME model (`WME`, `Condition`)
