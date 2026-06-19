@@ -1,14 +1,49 @@
-"""Unit tests for alpha.py — AlphaMemory, AlphaNode, RootNode, build helpers.
+"""Unit tests for alpha.py — AlphaMemory and RootNode with POPO dispatch.
 
-:see: Doorenbos §2.2
+:see: Doorenbos §2.2, UPDATE_PLAN §Step 3
 """
-from rete.alpha import (
-    AlphaMemory,
-    AlphaNode,
-    RootNode,
-)
-from rete.condition import WILDCARD, Condition
-from rete.fact import WME
+from dataclasses import dataclass
+from unittest.mock import MagicMock
+
+from rete.alpha import AlphaMemory, RootNode
+from rete.condition import Pattern
+from rete.fact import Fact
+
+
+@dataclass
+class Block:
+    """Minimal POPO: a coloured block."""
+
+    color: str
+
+
+@dataclass
+class On:
+    """Minimal POPO: upper block resting on lower."""
+
+    upper: str
+    lower: str
+
+
+class Animal:
+    """Base class for MRO-dispatch tests."""
+
+
+class Dog(Animal):
+    """Subclass for MRO-dispatch tests."""
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _accept_all(fact: Fact) -> bool:
+    return True
+
+
+def _reject_all(fact: Fact) -> bool:
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -16,204 +51,209 @@ from rete.fact import WME
 # ---------------------------------------------------------------------------
 
 
-def test_alpha_memory_activate_stores_wme():
-    mem = AlphaMemory()
-    w = WME("b1", "color", "red")
-    mem.activate(w)
-    assert w in mem.items
+def test_alpha_memory_activate_stores_fact():
+    mem = AlphaMemory(type_=Block, predicate=_accept_all)
+    f = Fact(Block("red"))
+    mem.activate(f)
+    assert f in mem.items
 
 
 def test_alpha_memory_activate_sets_back_pointer():
-    mem = AlphaMemory()
-    w = WME("b1", "color", "red")
-    mem.activate(w)
-    assert mem in w.alpha_memories
+    mem = AlphaMemory(type_=Block, predicate=_accept_all)
+    f = Fact(Block("red"))
+    mem.activate(f)
+    assert mem in f.alpha_memories
 
 
-def test_alpha_memory_deactivate_removes_wme():
-    mem = AlphaMemory()
-    w = WME("b1", "color", "red")
-    mem.activate(w)
-    mem.deactivate(w)
-    assert w not in mem.items
+def test_alpha_memory_predicate_filters():
+    def is_blue(fact: Fact) -> bool:
+        return fact.obj.color == "blue"
+
+    mem = AlphaMemory(type_=Block, predicate=is_blue)
+    f = Fact(Block("red"))
+    mem.activate(f)
+    assert f not in mem.items
+
+
+def test_alpha_memory_predicate_filter_skips_back_pointer():
+    def is_blue(fact: Fact) -> bool:
+        return fact.obj.color == "blue"
+
+    mem = AlphaMemory(type_=Block, predicate=is_blue)
+    f = Fact(Block("red"))
+    mem.activate(f)
+    assert mem not in f.alpha_memories
+
+
+def test_alpha_memory_deactivate_removes_fact():
+    mem = AlphaMemory(type_=Block, predicate=_accept_all)
+    f = Fact(Block("red"))
+    mem.activate(f)
+    mem.deactivate(f)
+    assert f not in mem.items
 
 
 def test_alpha_memory_deactivate_clears_back_pointer():
-    mem = AlphaMemory()
-    w = WME("b1", "color", "red")
-    mem.activate(w)
-    mem.deactivate(w)
-    assert mem not in w.alpha_memories
+    mem = AlphaMemory(type_=Block, predicate=_accept_all)
+    f = Fact(Block("red"))
+    mem.activate(f)
+    mem.deactivate(f)
+    assert mem not in f.alpha_memories
+
+
+def test_alpha_memory_notifies_successors_on_activate():
+    successor = MagicMock()
+    mem = AlphaMemory(type_=Block, predicate=_accept_all, successors=[successor])
+    f = Fact(Block("red"))
+    mem.activate(f)
+    successor.right_activate.assert_called_once_with(f)
+
+
+def test_alpha_memory_notifies_successors_before_remove():
+    removed_during_retract: list[bool] = []
+    mem = AlphaMemory(type_=Block, predicate=_accept_all)
+    f = Fact(Block("red"))
+    mem.activate(f)
+
+    class Probe:
+        def right_retract(self, fact: Fact) -> None:
+            removed_during_retract.append(fact in mem.items)
+
+    mem.successors.append(Probe())
+    mem.deactivate(f)
+    assert removed_during_retract == [True]
 
 
 # ---------------------------------------------------------------------------
-# AlphaNode
+# RootNode.activate / deactivate
 # ---------------------------------------------------------------------------
 
 
-def test_alpha_node_matching_wme_reaches_memory():
-    mem = AlphaMemory()
-    node = AlphaNode(field="attribute", symbol="color", output_memory=mem)
-    w = WME("b1", "color", "red")
-    node.activate(w)
-    assert w in mem.items
-
-
-def test_alpha_node_nonmatching_wme_stops():
-    mem = AlphaMemory()
-    node = AlphaNode(field="attribute", symbol="color", output_memory=mem)
-    w = WME("b1", "size", "large")
-    node.activate(w)
-    assert w not in mem.items
-
-
-def test_alpha_node_propagates_to_child():
-    mem = AlphaMemory()
-    child = AlphaNode(field="value", symbol="red", output_memory=mem)
-    parent = AlphaNode(field="attribute", symbol="color", children=[child])
-    w = WME("b1", "color", "red")
-    parent.activate(w)
-    assert w in mem.items
-
-
-def test_alpha_node_nonmatching_does_not_reach_child():
-    mem = AlphaMemory()
-    child = AlphaNode(field="value", symbol="red", output_memory=mem)
-    parent = AlphaNode(field="attribute", symbol="color", children=[child])
-    w = WME("b1", "size", "large")
-    parent.activate(w)
-    assert w not in mem.items
-
-
-def test_alpha_node_chain_both_match():
-    mem = AlphaMemory()
-    node2 = AlphaNode(field="value", symbol="red", output_memory=mem)
-    node1 = AlphaNode(field="attribute", symbol="color", children=[node2])
-    w = WME("b1", "color", "red")
-    node1.activate(w)
-    assert w in mem.items
-
-
-def test_alpha_node_chain_first_fails():
-    mem = AlphaMemory()
-    node2 = AlphaNode(field="value", symbol="red", output_memory=mem)
-    node1 = AlphaNode(field="attribute", symbol="color", children=[node2])
-    w = WME("b1", "size", "red")
-    node1.activate(w)
-    assert w not in mem.items
-
-
-# ---------------------------------------------------------------------------
-# RootNode
-# ---------------------------------------------------------------------------
-
-
-def test_root_node_fans_out_to_all_children():
-    mem1 = AlphaMemory()
-    mem2 = AlphaMemory()
-    node1 = AlphaNode(field="attribute", symbol="color", output_memory=mem1)
-    node2 = AlphaNode(field="attribute", symbol="size", output_memory=mem2)
-    root = RootNode(children=[node1, node2])
-    w_color = WME("b1", "color", "red")
-    w_size = WME("b2", "size", "large")
-    root.activate(w_color)
-    root.activate(w_size)
-    assert w_color in mem1.items
-    assert w_size in mem2.items
-    assert w_color not in mem2.items
-    assert w_size not in mem1.items
-
-
-# ---------------------------------------------------------------------------
-# build_or_share_alpha_node
-# ---------------------------------------------------------------------------
-
-
-def test_build_or_share_creates_new_node():
+def test_root_activate_stores_fact():
     root = RootNode()
-    node = AlphaNode.build_or_share(root, "attribute", "color")
-    assert node in root.children
-    assert node.field == "attribute"
-    assert node.symbol == "color"
+    f = Fact(Block("red"))
+    root.activate(f)
+    assert f in root._facts
 
 
-def test_build_or_share_reuses_existing_node():
+def test_root_deactivate_removes_fact():
     root = RootNode()
-    n1 = AlphaNode.build_or_share(root, "attribute", "color")
-    n2 = AlphaNode.build_or_share(root, "attribute", "color")
-    assert n1 is n2
-    assert len(root.children) == 1
+    f = Fact(Block("red"))
+    root.activate(f)
+    root.deactivate(f)
+    assert f not in root._facts
 
 
-def test_build_or_share_different_symbol_creates_new():
+def test_root_dispatches_matching_type():
     root = RootNode()
-    n1 = AlphaNode.build_or_share(root, "attribute", "color")
-    n2 = AlphaNode.build_or_share(root, "attribute", "size")
-    assert n1 is not n2
-    assert len(root.children) == 2
+    mem = root.build_or_share_alpha_memory(Pattern(type_=Block))
+    f = Fact(Block("red"))
+    root.activate(f)
+    assert f in mem.items
+
+
+def test_root_does_not_dispatch_wrong_type():
+    root = RootNode()
+    mem = root.build_or_share_alpha_memory(Pattern(type_=Block))
+    f = Fact(On("a", "b"))
+    root.activate(f)
+    assert f not in mem.items
+
+
+def test_root_mro_dispatch():
+    """A Dog fact must activate a Pattern(type_=Animal) alpha memory."""
+    root = RootNode()
+    mem = root.build_or_share_alpha_memory(Pattern(type_=Animal))
+    f = Fact(Dog())
+    root.activate(f)
+    assert f in mem.items
+
+
+def test_root_predicate_filters_at_dispatch():
+    # alpha_tests receive the raw object (fact.obj), not the Fact wrapper
+    def is_red(obj: Block) -> bool:
+        return obj.color == "red"
+
+    root = RootNode()
+    mem = root.build_or_share_alpha_memory(
+        Pattern(type_=Block, alpha_tests=(is_red,))
+    )
+    f = Fact(Block("blue"))
+    root.activate(f)
+    assert f not in mem.items
 
 
 # ---------------------------------------------------------------------------
-# build_or_share_alpha_memory
+# RootNode.build_or_share_alpha_memory
 # ---------------------------------------------------------------------------
 
 
-def test_build_or_share_alpha_memory_constant_condition():
+def test_build_or_share_returns_alpha_memory():
     root = RootNode()
-    cond = Condition("b1", "color", "red")
-    mem = root.build_or_share_alpha_memory(cond)
+    mem = root.build_or_share_alpha_memory(Pattern(type_=Block))
     assert isinstance(mem, AlphaMemory)
-    w = WME("b1", "color", "red")
-    root.activate(w)
-    assert w in mem.items
 
 
-def test_build_or_share_alpha_memory_wrong_wme_excluded():
+def test_build_or_share_sharing_same_function():
     root = RootNode()
-    cond = Condition("b1", "color", "red")
-    mem = root.build_or_share_alpha_memory(cond)
-    w = WME("b1", "color", "blue")
-    root.activate(w)
-    assert w not in mem.items
+    p1 = Pattern(type_=Block, alpha_tests=(_accept_all,))
+    p2 = Pattern(type_=Block, alpha_tests=(_accept_all,))
+    assert root.build_or_share_alpha_memory(p1) is root.build_or_share_alpha_memory(p2)
 
 
-def test_build_or_share_alpha_memory_wildcard_skipped():
+def test_build_or_share_no_sharing_distinct_lambdas():
     root = RootNode()
-    cond = Condition(WILDCARD, "color", WILDCARD)
-    mem = root.build_or_share_alpha_memory(cond)
-    w = WME("anything", "color", "whatever")
-    root.activate(w)
-    assert w in mem.items
+    p1 = Pattern(type_=Block, alpha_tests=(lambda f: True,))
+    p2 = Pattern(type_=Block, alpha_tests=(lambda f: True,))
+    m1 = root.build_or_share_alpha_memory(p1)
+    m2 = root.build_or_share_alpha_memory(p2)
+    assert m1 is not m2
 
 
-def test_build_or_share_alpha_memory_variable_skipped():
+def test_build_or_share_different_types_not_shared():
     root = RootNode()
-    cond = Condition("?x", "color", "?v")
-    mem = root.build_or_share_alpha_memory(cond)
-    w = WME("b1", "color", "red")
-    root.activate(w)
-    assert w in mem.items
+    m1 = root.build_or_share_alpha_memory(Pattern(type_=Block))
+    m2 = root.build_or_share_alpha_memory(Pattern(type_=On))
+    assert m1 is not m2
 
 
-def test_build_or_share_alpha_memory_shared_prefix():
+def test_build_or_share_replays_existing_facts():
     root = RootNode()
-    cond1 = Condition(WILDCARD, "color", "red")
-    cond2 = Condition(WILDCARD, "color", "blue")
-    root.build_or_share_alpha_memory(cond1)
-    root.build_or_share_alpha_memory(cond2)
-    # Both conditions share the attribute=="color" node at root level
-    assert len(root.children) == 1
-    color_node = root.children[0]
-    assert color_node.field == "attribute"
-    assert color_node.symbol == "color"
-    assert len(color_node.children) == 2
+    f = Fact(Block("red"))
+    root.activate(f)
+    mem = root.build_or_share_alpha_memory(Pattern(type_=Block))
+    assert f in mem.items
 
 
-def test_build_or_share_alpha_memory_all_wildcards():
+def test_build_or_share_replay_filtered_by_predicate():
+    # alpha_tests receive the raw object (fact.obj), not the Fact wrapper
+    def is_red(obj: Block) -> bool:
+        return obj.color == "red"
+
     root = RootNode()
-    cond = Condition(WILDCARD, WILDCARD, WILDCARD)
-    mem = root.build_or_share_alpha_memory(cond)
-    assert isinstance(mem, AlphaMemory)
-    w = WME("x", "y", "z")
-    root.activate(w)
-    assert w in mem.items
+    f = Fact(Block("blue"))
+    root.activate(f)
+    mem = root.build_or_share_alpha_memory(
+        Pattern(type_=Block, alpha_tests=(is_red,))
+    )
+    assert f not in mem.items
+
+
+def test_build_or_share_no_double_registration():
+    """Calling twice with the same pattern must not activate a fact twice."""
+    root = RootNode()
+    p = Pattern(type_=Block)
+    mem = root.build_or_share_alpha_memory(p)
+    root.build_or_share_alpha_memory(p)  # second call — must be a no-op
+    f = Fact(Block("red"))
+    root.activate(f)
+    assert mem.items.count(f) == 1
+
+
+def test_build_or_share_replay_sets_back_pointer():
+    """Replayed facts must get their back-pointer set so retraction works."""
+    root = RootNode()
+    f = Fact(Block("red"))
+    root.activate(f)
+    mem = root.build_or_share_alpha_memory(Pattern(type_=Block))
+    assert mem in f.alpha_memories
