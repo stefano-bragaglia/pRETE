@@ -621,6 +621,59 @@ class TestShorthandPatterns:
 
 
 # ===========================================================================
+# Import integration (ES-5)
+# ===========================================================================
+
+class TestImportIntegration:
+    """End-to-end: imported types are usable in patterns and extends."""
+
+    def test_imported_type_in_pattern(self) -> None:
+        """A class imported via ``from … import`` can be matched in a LHS pattern."""
+        results: list[str] = []
+        src = (
+            "from rete.fact import Fact\n"
+            'rule "r"\nwhen\n  Fact()\nthen\n  results.append("fired")\nend'
+        )
+        engine, types = _setup(src, ctx={"results": results})
+        engine.add_fact(Fact(object()))
+        engine.run()
+        assert results == ["fired"]
+
+    def test_import_available_before_declare(self) -> None:
+        """Imported type is available as a parent in ``extends``."""
+        import sys
+        import types as _types_mod
+        from dataclasses import make_dataclass
+        Base = make_dataclass("_ES5Base", [("score", int)])
+        fake_mod = _types_mod.ModuleType("_es5_test_mod")
+        fake_mod._ES5Base = Base  # type: ignore[attr-defined]
+        sys.modules["_es5_test_mod"] = fake_mod
+        try:
+            src = (
+                "from _es5_test_mod import _ES5Base\n"
+                "declare Child extends _ES5Base\n"
+                "  name: str\n"
+                "end\n"
+            )
+            types, _ = load_prl(src)
+            assert issubclass(types["Child"], Base)
+        finally:
+            del sys.modules["_es5_test_mod"]
+
+    def test_drools_style_import_in_pattern(self) -> None:
+        """``import module.ClassName`` form also makes the type available."""
+        results: list[str] = []
+        src = (
+            "import rete.fact.Fact\n"
+            'rule "r"\nwhen\n  Fact()\nthen\n  results.append("ok")\nend'
+        )
+        engine, types = _setup(src, ctx={"results": results})
+        engine.add_fact(Fact(object()))
+        engine.run()
+        assert results == ["ok"]
+
+
+# ===========================================================================
 # Public API
 # ===========================================================================
 

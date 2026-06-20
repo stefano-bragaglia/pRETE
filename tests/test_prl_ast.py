@@ -12,6 +12,7 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    ImportDecl,
     NamedConstraint,
     NccPatternGroup,
     PatternNode,
@@ -173,6 +174,36 @@ class TestNamedConstraint:
 
     def test_hashable(self) -> None:
         assert hash(NamedConstraint("f", 1)) == hash(NamedConstraint("f", 1))
+
+
+# ===========================================================================
+# ImportDecl (ES-5)
+# ===========================================================================
+
+class TestImportDecl:
+    """``ImportDecl`` is a frozen dataclass of ``(qualified, alias)`` pairs."""
+
+    def test_single_name(self) -> None:
+        d = ImportDecl((("rete.fact.Fact", "Fact"),))
+        assert d.names == (("rete.fact.Fact", "Fact"),)
+
+    def test_multiple_names(self) -> None:
+        d = ImportDecl((("a.B", "B"), ("a.C", "MyC")))
+        assert len(d.names) == 2
+
+    def test_frozen(self) -> None:
+        d = ImportDecl((("a.B", "B"),))
+        with pytest.raises(AttributeError):
+            d.names = ()  # type: ignore[misc]
+
+    def test_structural_equality(self) -> None:
+        a = ImportDecl((("a.B", "B"),))
+        assert a == ImportDecl((("a.B", "B"),))
+        assert a != ImportDecl((("a.C", "C"),))
+
+    def test_hashable(self) -> None:
+        d = ImportDecl((("a.B", "B"),))
+        assert hash(d) == hash(ImportDecl((("a.B", "B"),)))
 
 
 # ===========================================================================
@@ -396,6 +427,15 @@ class TestProgramNode:
         pn = ProgramNode((), ())
         with pytest.raises(AttributeError):
             pn.declares = (DeclareDecl("X", ()),)  # type: ignore[misc]
+
+    def test_imports_default_empty(self) -> None:
+        pn = ProgramNode((), ())
+        assert pn.imports == ()
+
+    def test_with_import(self) -> None:
+        imp = ImportDecl((("a.B", "B"),))
+        pn = ProgramNode((), (), imports=(imp,))
+        assert len(pn.imports) == 1
 
     def test_structural_equality(self) -> None:
         assert ProgramNode((), ()) == ProgramNode((), ())
