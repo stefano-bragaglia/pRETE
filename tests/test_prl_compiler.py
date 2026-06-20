@@ -55,20 +55,23 @@ _TYPES: dict[str, type] = {"_Temp": _Temp, "_Sensor": _Sensor}
 # ===========================================================================
 
 class TestJavaType:
-    """``_java_type`` maps Java primitives and falls back to ``Any``."""
+    """``_java_type`` maps PRL type names to Python types."""
 
-    def test_double_maps_to_float(self) -> None:
-        assert _java_type("double", {}) is float
+    def test_float_maps_to_float(self) -> None:
         assert _java_type("float", {}) is float
 
-    def test_int_and_long_map_to_int(self) -> None:
+    def test_str_maps_to_str(self) -> None:
+        assert _java_type("str", {}) is str
+
+    def test_bool_maps_to_bool(self) -> None:
+        assert _java_type("bool", {}) is bool
+
+    def test_int_maps_to_int(self) -> None:
         assert _java_type("int", {}) is int
-        assert _java_type("long", {}) is int
 
-    def test_string_maps_to_str(self) -> None:
+    def test_java_aliases_still_work(self) -> None:
+        assert _java_type("double", {}) is float
         assert _java_type("String", {}) is str
-
-    def test_boolean_maps_to_bool(self) -> None:
         assert _java_type("boolean", {}) is bool
 
     def test_unknown_falls_back_to_any(self) -> None:
@@ -92,21 +95,21 @@ class TestCompileDeclare:
         assert len(dc_fields(cls)) == 0
 
     def test_one_field_type(self) -> None:
-        decl = DeclareDecl("Temp", (FieldDecl("value", "double"),))
+        decl = DeclareDecl("Temp", (FieldDecl("value", "float"),))
         cls = _compile_declare(decl, {})
         assert dc_fields(cls)[0].type is float
 
     def test_two_fields_names(self) -> None:
         decl = DeclareDecl(
             "Temp",
-            (FieldDecl("sensor", "String"), FieldDecl("value", "double")),
+            (FieldDecl("sensor", "str"), FieldDecl("value", "float")),
         )
         cls = _compile_declare(decl, {})
         names = [f.name for f in dc_fields(cls)]
         assert names == ["sensor", "value"]
 
     def test_instance_creation(self) -> None:
-        decl = DeclareDecl("Temp", (FieldDecl("value", "double"),))
+        decl = DeclareDecl("Temp", (FieldDecl("value", "float"),))
         cls = _compile_declare(decl, {})
         obj = cls(value=42.0)
         assert obj.value == 42.0
@@ -335,7 +338,7 @@ class TestLoadPrl:
 
     def test_rule_produces_one_production(self) -> None:
         src = (
-            "declare _T\n  v: double\nend\n"
+            "declare _T\n  v: float\nend\n"
             'rule "r" when\n  _T(v > 0)\nthen\npass\nend'
         )
         _, prods = load_prl(src)
@@ -343,7 +346,7 @@ class TestLoadPrl:
 
     def test_production_lhs_populated(self) -> None:
         src = (
-            "declare _T\n  v: double\nend\n"
+            "declare _T\n  v: float\nend\n"
             'rule "r" when\n  _T(v > 0)\nthen\npass\nend'
         )
         _, prods = load_prl(src)

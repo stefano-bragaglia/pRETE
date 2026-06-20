@@ -322,13 +322,13 @@ class TestDeclareBlock:
     """Declare block tokenizes to the expected flat sequence."""
 
     def test_declare_block_header(self) -> None:
-        result = _kv("declare Temp\n  value: double\nend")
+        result = _kv("declare Temp\n  value: float\nend")
         assert result[0] == ("KW", "declare")
         assert result[1] == ("IDENT", "Temp")
         assert result[-1] == ("KW", "end")
 
     def test_declare_block_field_tokens(self) -> None:
-        result = _kv("declare Temp\n  value: double\nend")
+        result = _kv("declare Temp\n  value: float\nend")
         assert ("IDENT", "value") in result
         assert ("PUNCT", ":") in result
 
@@ -338,7 +338,7 @@ class TestRuleBlock:
 
     def test_rule_starts_with_kw(self) -> None:
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "too-hot"\n  when\n    /Temp[value >= 80]\n  then\n    pass\nend\n'
         )
         toks = tokenize(src)
@@ -346,7 +346,7 @@ class TestRuleBlock:
 
     def test_rule_contains_one_rawblock(self) -> None:
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "too-hot"\n  when\n    /Temp[value >= 80]\n  then\n    pass\nend\n'
         )
         rawblocks = _rawblocks(tokenize(src))

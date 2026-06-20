@@ -43,15 +43,10 @@ __all__ = ["load_prl"]
 # ---------------------------------------------------------------------------
 
 _JAVA_TO_PY: dict[str, type] = {
-    "int": int,
-    "long": int,
-    "short": int,
-    "byte": int,
-    "double": float,
-    "float": float,
-    "boolean": bool,
-    "String": str,
-    "char": str,
+    "str": str, "float": float, "bool": bool,
+    "int": int, "long": int, "short": int, "byte": int,
+    "double": float, "boolean": bool,
+    "String": str, "char": str,
     "Object": object,
 }
 

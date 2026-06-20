@@ -20,6 +20,7 @@ _KEYWORDS: frozenset[str] = frozenset({
     "package", "declare", "rule", "end",
     "when", "then", "not", "salience",
     "true", "false", "null", "None",
+    "True", "False",
 })
 
 _SILENT: frozenset[str] = frozenset({"COMMENT_BLOCK", "COMMENT_LINE", "SPACE"})

@@ -27,12 +27,12 @@ class TestFieldDecl:
     """``FieldDecl`` is a frozen, equality-comparable, hashable dataclass."""
 
     def test_construction(self) -> None:
-        fd = FieldDecl("value", "double")
+        fd = FieldDecl("value", "float")
         assert fd.name == "value"
-        assert fd.type_name == "double"
+        assert fd.type_name == "float"
 
     def test_frozen(self) -> None:
-        fd = FieldDecl("name", "String")
+        fd = FieldDecl("name", "str")
         with pytest.raises(AttributeError):
             fd.name = "other"  # type: ignore[misc]
 
@@ -58,7 +58,7 @@ class TestDeclareDecl:
         assert dd.fields == ()
 
     def test_construction_with_fields(self) -> None:
-        fields = (FieldDecl("value", "double"),)
+        fields = (FieldDecl("value", "float"),)
         dd = DeclareDecl("Temp", fields)
         assert len(dd.fields) == 1
 

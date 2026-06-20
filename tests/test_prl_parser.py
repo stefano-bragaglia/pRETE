@@ -104,20 +104,20 @@ class TestParseDeclare:
         assert dd.fields == ()
 
     def test_one_field(self) -> None:
-        fd = _parse("declare Temp\n  value: double\nend").declares[0].fields[0]
+        fd = _parse("declare Temp\n  value: float\nend").declares[0].fields[0]
         assert fd.name == "value"
-        assert fd.type_name == "double"
+        assert fd.type_name == "float"
 
     def test_two_fields_count(self) -> None:
         fields = _parse(
-            "declare Temp\n  sensor: String\n  value: double\nend"
+            "declare Temp\n  sensor: str\n  value: float\nend"
         ).declares[0].fields
         assert len(fields) == 2
         assert fields[0].name == "sensor"
 
-    def test_java_type_name_stored_verbatim(self) -> None:
-        dd = _parse("declare Temp\n  value: double\nend").declares[0]
-        assert dd.fields[0].type_name == "double"
+    def test_type_name_stored_verbatim(self) -> None:
+        dd = _parse("declare Temp\n  value: float\nend").declares[0]
+        assert dd.fields[0].type_name == "float"
 
 
 # ===========================================================================
@@ -325,12 +325,12 @@ class TestParseConstraints:
         assert c.rhs == "Alice"
 
     def test_compare_bool_true(self) -> None:
-        c = _first_constraint("/T[active == true]")
+        c = _first_constraint("/T[active == True]")
         assert isinstance(c, CompareConstraint)
         assert c.rhs is True
 
-    def test_compare_null(self) -> None:
-        c = _first_constraint("/T[owner == null]")
+    def test_compare_none(self) -> None:
+        c = _first_constraint("/T[owner == None]")
         assert isinstance(c, CompareConstraint)
         assert c.rhs is None
 

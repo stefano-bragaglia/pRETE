@@ -22,10 +22,9 @@ __all__ = ["parse"]
 _NUM_PARSERS: dict[str, type] = {"INT": int, "FLOAT": float}
 
 _BOOL_LITERALS: dict[str, bool | None] = {
-    "true": True,
-    "false": False,
-    "null": None,
-    "None": None,
+    "True": True, "False": False,
+    "true": True, "false": False,
+    "None": None, "null": None,
 }
 
 
@@ -151,7 +150,7 @@ class Parser:
 
     def _try_bool(self) -> None:
         t = self._peek()
-        if t and t.kind == "KW" and t.value in ("true", "false"):
+        if t and t.kind == "KW" and t.value in ("True", "False", "true", "false"):
             self._advance()
 
     # ------------------------------------------------------------------

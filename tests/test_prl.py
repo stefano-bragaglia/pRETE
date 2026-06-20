@@ -44,19 +44,19 @@ class TestDeclare:
     """``declare`` blocks are compiled into usable Python dataclasses."""
 
     def test_class_generated(self) -> None:
-        _, types = _setup("declare Temp\n  value: double\nend")
+        _, types = _setup("declare Temp\n  value: float\nend")
         assert "Temp" in types
         assert types["Temp"].__name__ == "Temp"
 
     def test_java_type_mapping(self) -> None:
-        src = "declare Bean\n  name: String\n  count: int\nend"
+        src = "declare Bean\n  name: str\n  count: int\nend"
         _, types = _setup(src)
         flds = dc_fields(types["Bean"])
         assert flds[0].type is str
         assert flds[1].type is int
 
     def test_instance_creation(self) -> None:
-        _, types = _setup("declare Temp\n  value: double\nend")
+        _, types = _setup("declare Temp\n  value: float\nend")
         obj = types["Temp"](value=42.0)
         assert obj.value == 42.0
 
@@ -80,7 +80,7 @@ class TestOoPath:
     def test_fires_for_matching_value(self) -> None:
         fired: list[bool] = []
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "r" when\n  /Temp[value >= 80]\nthen\n  fired.append(True)\nend'
         )
         engine, types = _setup(src, {"fired": fired})
@@ -90,7 +90,7 @@ class TestOoPath:
 
     def test_does_not_fire_for_non_matching_value(self) -> None:
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "r" when\n  /Temp[value >= 80]\nthen\n  pass\nend'
         )
         engine, types = _setup(src)
@@ -100,7 +100,7 @@ class TestOoPath:
     def test_no_constraint_matches_any_instance(self) -> None:
         fired: list[bool] = []
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "r" when\n  /Temp\nthen\n  fired.append(True)\nend'
         )
         engine, types = _setup(src, {"fired": fired})
@@ -112,7 +112,7 @@ class TestOoPath:
     def test_fact_binding_exposes_fact_wrapper(self) -> None:
         captured: list = []
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "r" when\n  $t: /Temp[value >= 80]\n'
             "then\n  captured.append(t)\nend"
         )
@@ -133,7 +133,7 @@ class TestTraditional:
     def test_fires_for_matching_value(self) -> None:
         fired: list[bool] = []
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "r" when\n  Temp(value > 50)\nthen\n  fired.append(True)\nend'
         )
         engine, types = _setup(src, {"fired": fired})
@@ -142,7 +142,7 @@ class TestTraditional:
 
     def test_does_not_fire_for_non_matching_value(self) -> None:
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "r" when\n  Temp(value > 50)\nthen\n  pass\nend'
         )
         engine, types = _setup(src)
@@ -160,7 +160,7 @@ class TestBindingsAndJoins:
     def test_field_binding_value_in_rhs(self) -> None:
         captured: list = []
         src = (
-            "declare Temp\n  sensor: String\n  value: double\nend\n"
+            "declare Temp\n  sensor: str\n  value: float\nend\n"
             'rule "r" when\n  /Temp[value >= 80, $s: sensor]\n'
             "then\n  captured.append(s)\nend"
         )
@@ -172,8 +172,8 @@ class TestBindingsAndJoins:
     def test_cross_fact_join_fires(self) -> None:
         fired: list = []
         src = (
-            "declare Applicant\n  name: String\n  age: int\nend\n"
-            "declare Loan\n  applicant: String\nend\n"
+            "declare Applicant\n  name: str\n  age: int\nend\n"
+            "declare Loan\n  applicant: str\nend\n"
             'rule "underage" when\n'
             "  Applicant(age < 21, $name: name)\n"
             "  Loan(applicant == $name)\n"
@@ -190,8 +190,8 @@ class TestBindingsAndJoins:
     def test_cross_fact_join_suppressed_for_mismatch(self) -> None:
         fired: list = []
         src = (
-            "declare A\n  key: String\nend\n"
-            "declare B\n  key: String\nend\n"
+            "declare A\n  key: str\nend\n"
+            "declare B\n  key: str\nend\n"
             'rule "r" when\n  A($k: key)\n  B(key == $k)\n'
             "then\n  fired.append(True)\nend"
         )
@@ -212,7 +212,7 @@ class TestFactBinding:
     def test_fact_wrapper_is_fact_instance(self) -> None:
         captured: list = []
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "r" when\n  $t: /Temp\n'
             "then\n  captured.append(t)\nend"
         )
@@ -224,8 +224,8 @@ class TestFactBinding:
 
     def test_mutation_via_obj_attribute(self) -> None:
         src = (
-            "declare App\n  approved: boolean\nend\n"
-            'rule "r" when\n  $app: App(approved == true)\n'
+            "declare App\n  approved: bool\nend\n"
+            'rule "r" when\n  $app: App(approved == True)\n'
             "then\n  app.obj.approved = False\nend"
         )
         engine, types = _setup(src)
@@ -240,8 +240,8 @@ class TestFactBinding:
 # ===========================================================================
 
 _NOT_BLUE_PRL = (
-    "declare Block\n  name: String\nend\n"
-    "declare Color\n  color: String\nend\n"
+    "declare Block\n  name: str\nend\n"
+    "declare Color\n  color: str\nend\n"
     'rule "r" when\n  Block()\n  not Color(color == "blue")\n'
     "then\n  fired.append(True)\nend"
 )
@@ -311,8 +311,8 @@ class TestRhsHelpers:
     def test_insert_triggers_second_rule(self) -> None:
         captured: list = []
         src = (
-            "declare Temp\n  value: double\nend\n"
-            "declare Alert\n  msg: String\nend\n"
+            "declare Temp\n  value: float\nend\n"
+            "declare Alert\n  msg: str\nend\n"
             'rule "hot" when\n  /Temp[value >= 80]\n'
             'then\n  insert(Alert("HIGH"))\nend\n'
             'rule "alert" when\n  /Alert[msg == "HIGH"]\n'
@@ -325,7 +325,7 @@ class TestRhsHelpers:
 
     def test_retract_clears_conflict_set(self) -> None:
         src = (
-            "declare Temp\n  value: double\nend\n"
+            "declare Temp\n  value: float\nend\n"
             'rule "remove" when\n  $t: /Temp[value < 0]\n'
             "then\n  retract(t)\nend"
         )
@@ -336,8 +336,8 @@ class TestRhsHelpers:
 
     def test_update_triggers_re_evaluation(self) -> None:
         src = (
-            "declare App\n  approved: boolean\nend\n"
-            'rule "deny" when\n  $app: App(approved == true)\n'
+            "declare App\n  approved: bool\nend\n"
+            'rule "deny" when\n  $app: App(approved == True)\n'
             "then\n  app.obj.approved = False\n  update(app)\nend"
         )
         engine, types = _setup(src)
@@ -357,7 +357,7 @@ class TestComments:
     def test_line_comment_stripped(self) -> None:
         src = (
             "// leading comment\n"
-            "declare Temp  // inline\n  value: double\nend"
+            "declare Temp  // inline\n  value: float\nend"
         )
         _, types = _setup(src)
         assert "Temp" in types
@@ -365,7 +365,7 @@ class TestComments:
     def test_block_comment_stripped(self) -> None:
         src = (
             "/* block\n   comment */\n"
-            "declare Temp\n  value: double\nend"
+            "declare Temp\n  value: float\nend"
         )
         _, types = _setup(src)
         assert "Temp" in types
@@ -381,8 +381,8 @@ class TestEndToEnd:
     def test_temperature_alarm(self) -> None:
         alerts: list = []
         src = (
-            "declare Temperature\n  sensor: String\n  value: double\nend\n"
-            "declare Alert\n  severity: String\n  message: String\nend\n"
+            "declare Temperature\n  sensor: str\n  value: float\nend\n"
+            "declare Alert\n  severity: str\n  message: str\nend\n"
             'rule "too-hot"\n'
             "  when\n"
             "    $t: /Temperature[value >= 80]\n"
