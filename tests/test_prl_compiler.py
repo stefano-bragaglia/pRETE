@@ -612,12 +612,19 @@ class TestCompileImport:
 
     def test_import_available_for_extends(self) -> None:
         """Imported type is available as parent in ``extends``."""
-        from rete.fact import Fact
-        src = (
-            "from rete.fact import Fact\n"
-            "declare Child extends Fact\n"
-            "  extra: int\n"
-            "end\n"
-        )
-        types, _ = load_prl(src)
-        assert issubclass(types["Child"], Fact)
+        import sys
+        import types as _types_mod
+        from dataclasses import make_dataclass
+        Base = make_dataclass("_ES5Base", [("score", int)])
+        mod = _types_mod.ModuleType("_es5_compiler_mod")
+        mod._ES5Base = Base  # type: ignore[attr-defined]
+        sys.modules["_es5_compiler_mod"] = mod
+        try:
+            src = (
+                "from _es5_compiler_mod import _ES5Base\n"
+                "declare Child extends _ES5Base\n  name: str\nend\n"
+            )
+            resolved, _ = load_prl(src)
+            assert issubclass(resolved["Child"], Base)
+        finally:
+            del sys.modules["_es5_compiler_mod"]

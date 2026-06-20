@@ -14,6 +14,7 @@ __all__ = [
     "Tag",
     "FieldDecl",
     "DeclareDecl",
+    "ImportDecl",
     "BindConstraint",
     "CompareConstraint",
     "PositionalConstraint",
@@ -185,15 +186,28 @@ class RuleDecl:
 
 
 @dataclass(frozen=True)
+class ImportDecl:
+    """One import statement — one or more ``(qualified_path, local_alias)`` pairs.
+
+    The compiler splits each *qualified_path* at its last ``.`` to obtain the
+    module and attribute names for ``importlib``.
+
+    :param names: tuple of ``(full_dotted_path, local_alias)`` entries.
+    """
+
+    names: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class ProgramNode:
     """The parse-tree root — the entire PRL program.
 
-    Both fields are required (no defaults); the parser always provides them
-    explicitly, even as empty tuples.
-
     :param declares: ordered tuple of :class:`DeclareDecl` nodes.
     :param rules: ordered tuple of :class:`RuleDecl` nodes.
+    :param imports: ordered tuple of :class:`ImportDecl` nodes; defaults to
+        ``()`` to preserve backward-compatible positional construction.
     """
 
     declares: tuple[DeclareDecl, ...]
     rules: tuple[RuleDecl, ...]
+    imports: tuple[ImportDecl, ...] = ()

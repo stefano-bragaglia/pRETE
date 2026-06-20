@@ -18,6 +18,7 @@ The compiler has three sub-tasks:
 """
 from __future__ import annotations
 
+import importlib
 import operator
 import re
 import textwrap
@@ -32,6 +33,7 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    ImportDecl,
     NamedConstraint,
     NccPatternGroup,
     PatternNode,
@@ -97,6 +99,8 @@ def load_prl(
     """
     program = parse(tokenize(text))
     resolved: dict[str, type] = dict(types or {})
+    for imp in program.imports:
+        _resolve_import(imp, resolved)
     for decl in _topo_sort_declares(program.declares):
         resolved[decl.name] = _compile_declare(decl, resolved)
     productions = [
@@ -106,7 +110,50 @@ def load_prl(
 
 
 # ---------------------------------------------------------------------------
-# 4a — Type resolution
+# 4a — Import resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_import(imp: ImportDecl, types: dict[str, type]) -> None:
+    """Inject all names from *imp* into *types*.
+
+    :param imp: the :class:`ImportDecl` AST node.
+    :param types: the type registry to mutate in place.
+    """
+    for qualified, alias in imp.names:
+        types[alias] = _import_name(qualified)
+
+
+def _import_name(qualified: str) -> type:
+    """Resolve a fully-qualified dotted name to a Python object via importlib.
+
+    Splits at the last ``.``: everything before is the module; the last
+    component is the attribute fetched from that module.
+
+    :param qualified: full dotted path, e.g. ``"rete.fact.Fact"``.
+    :raises ImportError: if the module or attribute cannot be resolved.
+    """
+    module, _, attr = qualified.rpartition(".")
+    if not module:
+        raise ImportError(
+            f"Cannot import bare name {qualified!r}; "
+            "use 'import module.ClassName' or 'from module import ClassName'"
+        )
+    # ponytail: 'import a.b as mm' resolves to getattr(module_a, 'b'), not
+    # the module a.b itself. Full module-alias support needs dotted type names
+    # in patterns and is deferred past ES-5.
+    try:
+        return getattr(importlib.import_module(module), attr)
+    except ModuleNotFoundError as exc:
+        raise ImportError(f"Cannot import {qualified!r}: {exc}") from exc
+    except AttributeError:
+        raise ImportError(
+            f"Module {module!r} has no attribute {attr!r}"
+        ) from None
+
+
+# ---------------------------------------------------------------------------
+# 4b — Type resolution
 # ---------------------------------------------------------------------------
 
 

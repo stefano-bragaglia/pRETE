@@ -629,15 +629,30 @@ class TestImportIntegration:
 
     def test_imported_type_in_pattern(self) -> None:
         """A class imported via ``from … import`` can be matched in a LHS pattern."""
-        results: list[str] = []
-        src = (
-            "from rete.fact import Fact\n"
-            'rule "r"\nwhen\n  Fact()\nthen\n  results.append("fired")\nend'
-        )
-        engine, types = _setup(src, ctx={"results": results})
-        engine.add_fact(Fact(object()))
-        engine.run()
-        assert results == ["fired"]
+        import sys
+        import types as _types_mod
+        from dataclasses import dataclass as _dc
+
+        @_dc
+        class Widget:
+            color: str
+
+        mod = _types_mod.ModuleType("_es5_widget_mod")
+        mod.Widget = Widget  # type: ignore[attr-defined]
+        sys.modules["_es5_widget_mod"] = mod
+        try:
+            results: list[str] = []
+            src = (
+                "from _es5_widget_mod import Widget\n"
+                'rule "r"\nwhen\n  Widget(color == "red")\n'
+                'then\n  results.append("fired")\nend'
+            )
+            engine, types = _setup(src, ctx={"results": results})
+            engine.add_fact(Fact(Widget(color="red")))
+            engine.run()
+            assert results == ["fired"]
+        finally:
+            del sys.modules["_es5_widget_mod"]
 
     def test_import_available_before_declare(self) -> None:
         """Imported type is available as a parent in ``extends``."""
@@ -662,15 +677,30 @@ class TestImportIntegration:
 
     def test_drools_style_import_in_pattern(self) -> None:
         """``import module.ClassName`` form also makes the type available."""
-        results: list[str] = []
-        src = (
-            "import rete.fact.Fact\n"
-            'rule "r"\nwhen\n  Fact()\nthen\n  results.append("ok")\nend'
-        )
-        engine, types = _setup(src, ctx={"results": results})
-        engine.add_fact(Fact(object()))
-        engine.run()
-        assert results == ["ok"]
+        import sys
+        import types as _types_mod
+        from dataclasses import dataclass as _dc
+
+        @_dc
+        class Gadget:
+            size: int
+
+        mod = _types_mod.ModuleType("_es5_gadget_mod")
+        mod.Gadget = Gadget  # type: ignore[attr-defined]
+        sys.modules["_es5_gadget_mod"] = mod
+        try:
+            results: list[str] = []
+            src = (
+                "import _es5_gadget_mod.Gadget\n"
+                'rule "r"\nwhen\n  Gadget(size == 42)\n'
+                'then\n  results.append("ok")\nend'
+            )
+            engine, types = _setup(src, ctx={"results": results})
+            engine.add_fact(Fact(Gadget(size=42)))
+            engine.run()
+            assert results == ["ok"]
+        finally:
+            del sys.modules["_es5_gadget_mod"]
 
 
 # ===========================================================================
