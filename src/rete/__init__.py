@@ -21,6 +21,7 @@ from rete.condition import JoinSpec, NccGroup, Pattern, Production
 from rete.engine import InferenceEngine
 from rete.fact import Fact, Token
 from rete.network import ReteNetwork
+from rete.prl import load_prl
 
 __all__ = [
     "AlphaMemory",
@@ -34,6 +35,7 @@ __all__ = [
     "JoinSpec",
     "JoinTest",
     "LeftNode",
+    "load_prl",
     "NccGroup",
     "NccNode",
     "NccPartnerNode",

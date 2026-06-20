@@ -1,0 +1,36 @@
+// Loan approval — underage and bankruptcy rules.
+declare Applicant
+  name: str
+  age: int
+end
+
+declare LoanApplication
+  applicant: str
+  approved: bool
+  explanation: str
+end
+
+declare Bankruptcy
+  name: str
+  year: int
+end
+
+rule "underage"
+  when
+    Applicant(age < 21, $name: name)
+    $loan: LoanApplication(approved == True, applicant == $name)
+  then
+    loan.obj.approved = False
+    loan.obj.explanation = "Underage"
+    update(loan)
+end
+
+rule "bankruptcy"
+  when
+    $loan: LoanApplication(approved == True, $name: applicant)
+    Bankruptcy(name == $name, year > 1990)
+  then
+    loan.obj.approved = False
+    loan.obj.explanation = "Bankruptcy"
+    update(loan)
+end
