@@ -202,9 +202,10 @@ def _compile_rule(
         yet; it is silently carried here until the engine is extended.
     """
     # ponytail: rule.salience parsed but Production has no salience field yet
+    no_loop = rule.no_loop or any(t.name == "no-loop" for t in rule.tags)
     conditions, fact_bindings = _compile_lhs(rule.lhs, types)
     rhs = _compile_rhs(rule.rhs_src, fact_bindings, types, engine)
-    return Production(lhs=conditions, rhs=rhs)
+    return Production(lhs=conditions, rhs=rhs, no_loop=no_loop)
 
 
 def _compile_lhs(

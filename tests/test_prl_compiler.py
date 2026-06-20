@@ -411,3 +411,27 @@ class TestLoadPrl:
         src = 'rule "r" when\n  Ghost(x > 0)\nthen\npass\nend'
         with pytest.raises(NameError):
             load_prl(src)
+
+    def test_no_loop_attribute_sets_production_flag(self) -> None:
+        src = (
+            "declare _T\n  v: float\nend\n"
+            'rule "r"\n  no-loop\n  when\n  _T(v > 0)\nthen\npass\nend'
+        )
+        _, prods = load_prl(src)
+        assert prods[0].no_loop is True
+
+    def test_no_loop_tag_sets_production_flag(self) -> None:
+        src = (
+            "declare _T\n  v: float\nend\n"
+            '@no-loop\nrule "r" when\n  _T(v > 0)\nthen\npass\nend'
+        )
+        _, prods = load_prl(src)
+        assert prods[0].no_loop is True
+
+    def test_no_loop_false_by_default(self) -> None:
+        src = (
+            "declare _T\n  v: float\nend\n"
+            'rule "r" when\n  _T(v > 0)\nthen\npass\nend'
+        )
+        _, prods = load_prl(src)
+        assert prods[0].no_loop is False

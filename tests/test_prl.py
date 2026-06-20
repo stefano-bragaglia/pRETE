@@ -459,6 +459,71 @@ class TestInheritance:
 
 
 # ===========================================================================
+# No-loop (ES-2)
+# ===========================================================================
+
+class TestNoLoop:
+    """``@no-loop`` prevents a rule re-activating itself via ``update``."""
+
+    def test_no_loop_tag_fires_once_despite_update(self) -> None:
+        results: list = []
+        src = (
+            "declare Counter\n  value: int\nend\n"
+            "@no-loop\n"
+            'rule "inc" when\n'
+            "  $c: Counter(value < 5)\n"
+            "then\n"
+            "  c.obj.value += 1\n"
+            "  results.append(c.obj.value)\n"
+            "  update(c)\n"
+            "end"
+        )
+        engine, types = _setup(src, {"results": results})
+        engine.add_fact(Fact(types["Counter"](value=0)))
+        fired = engine.run(max_steps=10)
+        assert fired == 1
+        assert len(results) == 1
+
+    def test_without_no_loop_fires_until_condition_fails(self) -> None:
+        """Without ``@no-loop`` the rule fires on every re-inserted match."""
+        results: list = []
+        src = (
+            "declare Counter\n  value: int\nend\n"
+            'rule "inc" when\n'
+            "  $c: Counter(value < 5)\n"
+            "then\n"
+            "  c.obj.value += 1\n"
+            "  results.append(c.obj.value)\n"
+            "  update(c)\n"
+            "end"
+        )
+        engine, types = _setup(src, {"results": results})
+        engine.add_fact(Fact(types["Counter"](value=0)))
+        engine.run()
+        assert len(results) == 5  # fires for 0→1, 1→2, 2→3, 3→4, 4→5
+
+    def test_no_loop_attribute_also_fires_once(self) -> None:
+        results: list = []
+        src = (
+            "declare Counter\n  value: int\nend\n"
+            'rule "inc"\n'
+            "  no-loop\n"
+            "when\n"
+            "  $c: Counter(value < 5)\n"
+            "then\n"
+            "  c.obj.value += 1\n"
+            "  results.append(c.obj.value)\n"
+            "  update(c)\n"
+            "end"
+        )
+        engine, types = _setup(src, {"results": results})
+        engine.add_fact(Fact(types["Counter"](value=0)))
+        fired = engine.run(max_steps=10)
+        assert fired == 1
+        assert len(results) == 1
+
+
+# ===========================================================================
 # Public API
 # ===========================================================================
 

@@ -14,6 +14,7 @@ from rete.prl_ast import (
     PatternNode,
     ProgramNode,
     RuleDecl,
+    Tag,
 )
 from rete.prl_lexer import Tok
 
@@ -59,12 +60,13 @@ class Parser:
         declares: list[DeclareDecl],
         rules: list[RuleDecl],
     ) -> None:
+        tags = self._parse_tags()
         if self._peek_kw("package"):
             self._skip_package()
         elif self._peek_kw("declare"):
-            declares.append(self._parse_declare())
+            declares.append(self._parse_declare(tags))
         elif self._peek_kw("rule"):
-            rules.append(self._parse_rule())
+            rules.append(self._parse_rule(tags))
         else:
             t = self._peek()
             raise SyntaxError(
@@ -82,7 +84,7 @@ class Parser:
     # Declarations
     # ------------------------------------------------------------------
 
-    def _parse_declare(self) -> DeclareDecl:
+    def _parse_declare(self, tags: tuple[Tag, ...] = ()) -> DeclareDecl:
         self._expect("KW", "declare")
         name = self._expect("IDENT").value
         extends: str | None = None
@@ -91,15 +93,18 @@ class Parser:
             extends = self._expect("IDENT").value
         fields: list[FieldDecl] = []
         while not self._peek_kw("end"):
-            fields.append(self._parse_field())
+            field_tags = self._parse_tags()
+            if self._peek_kw("end"):
+                break  # stray tags before 'end' — store-and-ignore policy
+            fields.append(self._parse_field(field_tags))
         self._expect("KW", "end")
-        return DeclareDecl(name, tuple(fields), extends)
+        return DeclareDecl(name, tuple(fields), extends, tags)
 
-    def _parse_field(self) -> FieldDecl:
+    def _parse_field(self, tags: tuple[Tag, ...] = ()) -> FieldDecl:
         name = self._expect("IDENT").value
         self._expect("PUNCT", ":")
         type_name = self._parse_type_ref()
-        return FieldDecl(name, type_name)
+        return FieldDecl(name, type_name, tags)
 
     def _parse_type_ref(self) -> str:
         name = self._expect("IDENT").value
@@ -121,31 +126,32 @@ class Parser:
     # Rules and attributes
     # ------------------------------------------------------------------
 
-    def _parse_rule(self) -> RuleDecl:
+    def _parse_rule(self, tags: tuple[Tag, ...] = ()) -> RuleDecl:
         self._expect("KW", "rule")
         name = self._expect("STRING").value[1:-1]
-        salience = self._parse_rule_attrs()
+        salience, no_loop = self._parse_rule_attrs()
         self._expect("KW", "when")
         lhs = self._parse_lhs()
         self._expect("KW", "then")
         rhs_src = self._expect("RAWBLOCK").value
         self._expect("KW", "end")
-        return RuleDecl(name, salience, lhs, rhs_src)
+        return RuleDecl(name, salience, no_loop, lhs, rhs_src, tags)
 
-    def _parse_rule_attrs(self) -> int:
+    def _parse_rule_attrs(self) -> tuple[int, bool]:
         salience = 0
+        no_loop = False
         while not self._peek_kw("when"):
-            salience = self._parse_one_attr(salience)
-        return salience
+            salience, no_loop = self._parse_one_attr(salience, no_loop)
+        return salience, no_loop
 
-    def _parse_one_attr(self, salience: int) -> int:
+    def _parse_one_attr(self, salience: int, no_loop: bool) -> tuple[int, bool]:
         if self._peek_kw("salience"):
             self._advance()
-            return self._parse_int()
+            return self._parse_int(), no_loop
         if self._peek_kw("no-loop"):
             self._advance()
             self._try_bool()
-            return salience
+            return salience, True
         t = self._peek()
         raise SyntaxError(
             f"Unknown rule attribute at line {getattr(t, 'line', '?')}: "
@@ -318,6 +324,43 @@ class Parser:
         tok = self._expect("INT")
         val = int(tok.value)
         return -val if neg else val
+
+    # ------------------------------------------------------------------
+    # Tag parsing
+    # ------------------------------------------------------------------
+
+    def _parse_tags(self) -> tuple[Tag, ...]:
+        """Collect zero or more ``@name`` / ``@name(value)`` annotations."""
+        tags: list[Tag] = []
+        while self._peek_kind("AT"):
+            tags.append(self._parse_one_tag())
+        return tuple(tags)
+
+    def _parse_one_tag(self) -> Tag:
+        """Parse a single tag; tag name may be IDENT or KW (e.g. ``no-loop``)."""
+        self._expect("AT")
+        t = self._peek()
+        if t is None or t.kind not in ("IDENT", "KW"):
+            raise SyntaxError(
+                f"Expected tag name after '@' at line {getattr(t, 'line', '?')}"
+            )
+        name = self._advance().value
+        value: str | None = None
+        if self._peek_punct("("):
+            self._advance()
+            value = self._collect_tag_value()
+            self._expect("PUNCT", ")")
+        return Tag(name, value)
+
+    def _collect_tag_value(self) -> str:
+        """Consume tokens up to ``)``, joining their text."""
+        parts: list[str] = []
+        while not self._peek_punct(")"):
+            t = self._peek()
+            if t is None:
+                raise SyntaxError("Unterminated tag value: missing ')'")
+            parts.append(self._advance().value)
+        return "".join(parts)
 
     # ------------------------------------------------------------------
     # Token utilities

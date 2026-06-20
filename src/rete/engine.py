@@ -13,6 +13,21 @@ from rete.fact import Fact
 from rete.network import ReteNetwork
 
 
+def _keep(entry: Instantiation, production: Production, pre_ids: set) -> bool:
+    """Return True if *entry* should be kept in the conflict set.
+
+    Called after a ``no_loop`` rule fires to filter out self-reactivations.
+
+    :param entry: a conflict-set entry to evaluate.
+    :param production: the production that just fired.
+    :param pre_ids: ``id()`` values of entries for *production* that existed
+        before the firing; entries not in this set were added by the RHS.
+    """
+    if entry.production is not production:
+        return True
+    return id(entry) in pre_ids
+
+
 @dataclass
 class InferenceEngine:
     """Wraps :class:`ReteNetwork` with a select-and-fire loop.
@@ -107,6 +122,29 @@ class InferenceEngine:
         while cs and (max_steps is None or steps < max_steps):
             inst = self.strategy(cs)
             cs.remove(inst)
-            inst.production.rhs(inst.token)
+            self._fire(inst, cs)
             steps += 1
         return steps
+
+    def _fire(self, inst: Instantiation, cs: list[Instantiation]) -> None:
+        """Execute *inst*; suppress self-reactivations for ``no_loop`` rules.
+
+        :param inst: the instantiation being fired.
+        :param cs: the live conflict set (mutated in place when no_loop is set).
+        """
+        if inst.production.no_loop:
+            self._fire_no_loop(inst, cs)
+        else:
+            inst.production.rhs(inst.token)
+
+    def _fire_no_loop(
+        self, inst: Instantiation, cs: list[Instantiation]
+    ) -> None:
+        """Fire *inst* and remove any self-reactivations it adds to *cs*.
+
+        :param inst: the no-loop instantiation being fired.
+        :param cs: the live conflict set (mutated in place).
+        """
+        pre_ids = {id(i) for i in cs if i.production is inst.production}
+        inst.production.rhs(inst.token)
+        cs[:] = [i for i in cs if _keep(i, inst.production, pre_ids)]

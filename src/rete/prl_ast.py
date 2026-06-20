@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 __all__ = [
+    "Tag",
     "FieldDecl",
     "DeclareDecl",
     "BindConstraint",
@@ -23,6 +24,18 @@ __all__ = [
 
 
 @dataclass(frozen=True)
+class Tag:
+    """A single annotation tag — ``@name`` or ``@name(value)``.
+
+    :param name: tag identifier, e.g. ``"key"``, ``"role"``, ``"no-loop"``.
+    :param value: raw text between parentheses if present, ``None`` otherwise.
+    """
+
+    name: str
+    value: str | None = None
+
+
+@dataclass(frozen=True)
 class FieldDecl:
     """One field inside a ``declare`` block.
 
@@ -30,10 +43,12 @@ class FieldDecl:
     :param type_name: base type name after generic erasure, e.g. ``"double"``.
         Generic parameters (``List<Integer>``) are stripped by the parser;
         the compiler maps this name via ``_JAVA_TO_PY``.
+    :param tags: zero or more :class:`Tag` annotations preceding this field.
     """
 
     name: str
     type_name: str
+    tags: tuple[Tag, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -43,11 +58,13 @@ class DeclareDecl:
     :param name: class name, e.g. ``"Temperature"``.
     :param fields: ordered tuple of :class:`FieldDecl` instances; may be empty.
     :param extends: parent type name for inheritance, or ``None``.
+    :param tags: zero or more :class:`Tag` annotations preceding this declare.
     """
 
     name: str
     fields: tuple[FieldDecl, ...]
     extends: str | None = None
+    tags: tuple[Tag, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -120,15 +137,20 @@ class RuleDecl:
     :param salience: conflict-resolution priority; defaults to ``0`` when the
         ``salience`` attribute is absent.  Stored for future engine wiring;
         not yet used by :class:`~rete.engine.InferenceEngine`.
+    :param no_loop: ``True`` when the ``no-loop`` rule attribute is set.
+        The ``@no-loop`` tag (stored in ``tags``) is combined by the compiler.
     :param lhs: ordered tuple of :class:`PatternNode` or
         :class:`NccPatternGroup`; empty tuple means unconditional.
     :param rhs_src: verbatim Python source of the then-block (may be empty).
+    :param tags: zero or more :class:`Tag` annotations preceding this rule.
     """
 
     name: str
     salience: int = 0
+    no_loop: bool = False
     lhs: tuple[PatternNode | NccPatternGroup, ...] = ()
     rhs_src: str = ""
+    tags: tuple[Tag, ...] = ()
 
 
 @dataclass(frozen=True)

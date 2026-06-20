@@ -15,6 +15,7 @@ from rete.prl_ast import (
     PatternNode,
     ProgramNode,
     RuleDecl,
+    Tag,
 )
 from rete.prl_lexer import tokenize
 from rete.prl_parser import parse
@@ -163,16 +164,23 @@ class TestParseRuleAttrs:
     def test_no_loop_does_not_change_salience(self) -> None:
         rd = _first_rule('rule "r"\n  no-loop\n  when\nthen\npass\nend')
         assert rd.salience == 0
+        assert rd.no_loop is True
 
     def test_no_loop_with_explicit_true(self) -> None:
         rd = _first_rule('rule "r"\n  no-loop true\n  when\nthen\npass\nend')
         assert rd.salience == 0
+        assert rd.no_loop is True
 
     def test_salience_and_no_loop_together(self) -> None:
         rd = _first_rule(
             'rule "r"\n  salience 5\n  no-loop\n  when\nthen\npass\nend'
         )
         assert rd.salience == 5
+        assert rd.no_loop is True
+
+    def test_no_loop_false_by_default(self) -> None:
+        rd = _first_rule('rule "r" when\nthen\npass\nend')
+        assert rd.no_loop is False
 
 
 # ===========================================================================
@@ -399,3 +407,64 @@ class TestParseErrors:
     def test_unrecognised_top_level_token(self) -> None:
         with pytest.raises(SyntaxError):
             _parse("42")
+
+
+# ===========================================================================
+# Tag parsing (ES-2)
+# ===========================================================================
+
+class TestParseTags:
+    """Tags (``@name`` / ``@name(value)``) attach to declare, field, and rule nodes."""
+
+    def test_tag_no_value_on_declare(self) -> None:
+        dd = _parse("@timestamp\ndeclare E\nend").declares[0]
+        assert dd.tags == (Tag("timestamp"),)
+
+    def test_tag_with_value_on_declare(self) -> None:
+        dd = _parse("@role(event)\ndeclare E\nend").declares[0]
+        assert dd.tags == (Tag("role", "event"),)
+
+    def test_multiple_tags_on_declare(self) -> None:
+        dd = _parse("@role(event)\n@expires(30s)\ndeclare E\nend").declares[0]
+        assert dd.tags == (Tag("role", "event"), Tag("expires", "30s"))
+
+    def test_no_tags_gives_empty_tuple_on_declare(self) -> None:
+        dd = _parse("declare D\n  x: int\nend").declares[0]
+        assert dd.tags == ()
+
+    def test_field_tag_no_value(self) -> None:
+        fd = _parse("declare D\n  @key\n  id: int\nend").declares[0].fields[0]
+        assert fd.name == "id"
+        assert fd.tags == (Tag("key"),)
+
+    def test_field_tag_with_value(self) -> None:
+        fd = _parse("declare D\n  @custom(foo)\n  x: int\nend").declares[0].fields[0]
+        assert fd.tags == (Tag("custom", "foo"),)
+
+    def test_field_without_tag_has_empty_tags(self) -> None:
+        fd = _parse("declare D\n  x: int\nend").declares[0].fields[0]
+        assert fd.tags == ()
+
+    def test_multiple_fields_with_mixed_tags(self) -> None:
+        src = "declare D\n  @key\n  id: int\n  name: str\nend"
+        fields = _parse(src).declares[0].fields
+        assert fields[0].tags == (Tag("key"),)
+        assert fields[1].tags == ()
+
+    def test_no_loop_tag_on_rule_stored_in_tags(self) -> None:
+        rd = _first_rule('@no-loop\nrule "r" when\nthen\npass\nend')
+        assert Tag("no-loop") in rd.tags
+
+    def test_no_loop_tag_does_not_set_no_loop_field(self) -> None:
+        """Parser stores @no-loop in tags; the compiler sets Production.no_loop."""
+        rd = _first_rule('@no-loop\nrule "r" when\nthen\npass\nend')
+        assert rd.no_loop is False  # attribute form only; compiler combines both
+
+    def test_unknown_tag_stored_on_rule(self) -> None:
+        rd = _first_rule('@future_feature\nrule "r" when\nthen\npass\nend')
+        assert any(t.name == "future_feature" for t in rd.tags)
+
+    def test_no_loop_kw_tag_name_parsed(self) -> None:
+        """``@no-loop`` tag name is lexed as KW; parser must accept it."""
+        rd = _first_rule('@no-loop\nrule "r" when\nthen\npass\nend')
+        assert rd.tags[0].name == "no-loop"

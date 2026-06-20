@@ -16,7 +16,41 @@ from rete.prl_ast import (
     PatternNode,
     ProgramNode,
     RuleDecl,
+    Tag,
 )
+
+
+# ===========================================================================
+# Tag (ES-2)
+# ===========================================================================
+
+class TestTag:
+    """``Tag`` is a frozen dataclass representing one ``@name`` / ``@name(value)``."""
+
+    def test_construction_no_value(self) -> None:
+        tag = Tag("key")
+        assert tag.name == "key"
+        assert tag.value is None
+
+    def test_construction_with_value(self) -> None:
+        tag = Tag("role", "event")
+        assert tag.name == "role"
+        assert tag.value == "event"
+
+    def test_frozen(self) -> None:
+        tag = Tag("key")
+        with pytest.raises(AttributeError):
+            tag.name = "other"  # type: ignore[misc]
+
+    def test_structural_equality(self) -> None:
+        assert Tag("key") == Tag("key")
+        assert Tag("role", "event") == Tag("role", "event")
+        assert Tag("key") != Tag("role")
+        assert Tag("role", "event") != Tag("role", "fact")
+
+    def test_hashable(self) -> None:
+        assert hash(Tag("key")) == hash(Tag("key"))
+        assert hash(Tag("role", "event")) == hash(Tag("role", "event"))
 
 
 # ===========================================================================
@@ -30,6 +64,14 @@ class TestFieldDecl:
         fd = FieldDecl("value", "float")
         assert fd.name == "value"
         assert fd.type_name == "float"
+
+    def test_tags_default_empty(self) -> None:
+        fd = FieldDecl("value", "float")
+        assert fd.tags == ()
+
+    def test_construction_with_tags(self) -> None:
+        fd = FieldDecl("id", "int", tags=(Tag("key"),))
+        assert fd.tags == (Tag("key"),)
 
     def test_frozen(self) -> None:
         fd = FieldDecl("name", "str")
@@ -56,6 +98,14 @@ class TestDeclareDecl:
         dd = DeclareDecl("Marker", ())
         assert dd.name == "Marker"
         assert dd.fields == ()
+
+    def test_tags_default_empty(self) -> None:
+        dd = DeclareDecl("Marker", ())
+        assert dd.tags == ()
+
+    def test_construction_with_tags(self) -> None:
+        dd = DeclareDecl("E", (), tags=(Tag("role", "event"),))
+        assert dd.tags == (Tag("role", "event"),)
 
     def test_construction_with_fields(self) -> None:
         fields = (FieldDecl("value", "float"),)
@@ -220,13 +270,29 @@ class TestNccPatternGroup:
 # ===========================================================================
 
 class TestRuleDecl:
-    """``RuleDecl`` has three optional fields with sensible defaults."""
+    """``RuleDecl`` has optional fields with sensible defaults."""
 
     def test_defaults(self) -> None:
         rd = RuleDecl("my-rule")
         assert rd.salience == 0
         assert rd.lhs == ()
         assert rd.rhs_src == ""
+
+    def test_no_loop_default_false(self) -> None:
+        rd = RuleDecl("r")
+        assert rd.no_loop is False
+
+    def test_no_loop_explicit_true(self) -> None:
+        rd = RuleDecl("r", no_loop=True)
+        assert rd.no_loop is True
+
+    def test_tags_default_empty(self) -> None:
+        rd = RuleDecl("r")
+        assert rd.tags == ()
+
+    def test_tags_explicit(self) -> None:
+        rd = RuleDecl("r", tags=(Tag("no-loop"),))
+        assert rd.tags == (Tag("no-loop"),)
 
     def test_explicit_salience(self) -> None:
         rd = RuleDecl("r", salience=10)
@@ -249,6 +315,7 @@ class TestRuleDecl:
     def test_structural_equality(self) -> None:
         assert RuleDecl("r") == RuleDecl("r")
         assert RuleDecl("r") != RuleDecl("r", salience=5)
+        assert RuleDecl("r") != RuleDecl("r", no_loop=True)
 
 
 # ===========================================================================

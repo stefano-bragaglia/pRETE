@@ -373,3 +373,43 @@ class TestMultiRule:
         rawblocks = _rawblocks(tokenize(src))
         assert "x = 1" in rawblocks[0].value
         assert "y = 2" in rawblocks[1].value
+
+
+# ===========================================================================
+# AT token (ES-2)
+# ===========================================================================
+
+class TestAtToken:
+    """``@`` emits a dedicated AT token; tag-name tokens follow immediately."""
+
+    def test_at_emits_at_token(self) -> None:
+        toks = tokenize("@key")
+        assert toks[0] == Tok("AT", "@", 1)
+
+    def test_at_followed_by_ident(self) -> None:
+        toks = tokenize("@key")
+        assert toks[1] == Tok("IDENT", "key", 1)
+
+    def test_at_followed_by_kw_noloop(self) -> None:
+        """``@no-loop`` — tag name is KW, not IDENT."""
+        toks = tokenize("@no-loop")
+        assert toks[0] == Tok("AT", "@", 1)
+        assert toks[1] == Tok("KW", "no-loop", 1)
+
+    def test_at_with_value_parens(self) -> None:
+        kv = _kv("@role(event)")
+        assert kv == [
+            ("AT", "@"), ("IDENT", "role"), ("PUNCT", "("),
+            ("IDENT", "event"), ("PUNCT", ")"),
+        ]
+
+    def test_multiple_tags_produce_multiple_at_tokens(self) -> None:
+        toks = tokenize("@role(event)\n@key")
+        at_toks = [t for t in toks if t.kind == "AT"]
+        assert len(at_toks) == 2
+
+    def test_at_not_in_rawblock(self) -> None:
+        """``@`` inside a then-block is raw-captured, not emitted as AT."""
+        toks = tokenize("then\n  @decorator\nend")
+        at_toks = [t for t in toks if t.kind == "AT"]
+        assert at_toks == []
