@@ -430,3 +430,26 @@ class TestAtToken:
         toks = tokenize("then\n  @decorator\nend")
         at_toks = [t for t in toks if t.kind == "AT"]
         assert at_toks == []
+
+
+# ===========================================================================
+# Import keywords (ES-5)
+# ===========================================================================
+
+class TestImportKeywords:
+    """``import``, ``from``, and ``as`` are reserved keywords."""
+
+    def test_import_is_kw(self) -> None:
+        assert _kv("import") == [("KW", "import")]
+
+    def test_from_is_kw(self) -> None:
+        assert _kv("from") == [("KW", "from")]
+
+    def test_as_is_kw(self) -> None:
+        assert _kv("as") == [("KW", "as")]
+
+    def test_import_in_rawblock_not_kw(self) -> None:
+        """``import`` inside a then-block is raw-captured, not a KW token."""
+        toks = tokenize("then\n  import os\nend")
+        kw_toks = [t for t in toks if t.kind == "KW" and t.value == "import"]
+        assert kw_toks == []

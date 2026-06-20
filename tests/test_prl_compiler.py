@@ -572,3 +572,59 @@ class TestLoadPrl:
         )
         _, prods = load_prl(src)
         assert prods[0].no_loop is False
+
+
+# ===========================================================================
+# Import resolution (ES-5)
+# ===========================================================================
+
+class TestCompileImport:
+    """Import declarations resolve to the correct Python class."""
+
+    def test_from_import_single(self) -> None:
+        types, _ = load_prl("from rete.fact import Fact")
+        from rete.fact import Fact
+        assert types["Fact"] is Fact
+
+    def test_import_class(self) -> None:
+        types, _ = load_prl("import rete.fact.Fact")
+        from rete.fact import Fact
+        assert types["Fact"] is Fact
+
+    def test_from_import_with_alias(self) -> None:
+        types, _ = load_prl("from rete.fact import Fact as F")
+        from rete.fact import Fact
+        assert types["F"] is Fact
+
+    def test_from_import_multiple(self) -> None:
+        types, _ = load_prl("from rete.fact import Fact, Token")
+        from rete.fact import Fact, Token
+        assert types["Fact"] is Fact
+        assert types["Token"] is Token
+
+    def test_unknown_module_raises(self) -> None:
+        with pytest.raises(ImportError):
+            load_prl("import no_such_module.NoClass")
+
+    def test_unknown_attr_raises(self) -> None:
+        with pytest.raises(ImportError):
+            load_prl("from rete.fact import NoSuchClass")
+
+    def test_import_available_for_extends(self) -> None:
+        """Imported type is available as parent in ``extends``."""
+        import sys
+        import types as _types_mod
+        from dataclasses import make_dataclass
+        Base = make_dataclass("_ES5Base", [("score", int)])
+        mod = _types_mod.ModuleType("_es5_compiler_mod")
+        mod._ES5Base = Base  # type: ignore[attr-defined]
+        sys.modules["_es5_compiler_mod"] = mod
+        try:
+            src = (
+                "from _es5_compiler_mod import _ES5Base\n"
+                "declare Child extends _ES5Base\n  name: str\nend\n"
+            )
+            resolved, _ = load_prl(src)
+            assert issubclass(resolved["Child"], Base)
+        finally:
+            del sys.modules["_es5_compiler_mod"]

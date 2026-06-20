@@ -534,3 +534,57 @@ class TestParseShorthandConstraints:
         c = _first_constraint("Flag(true)")
         assert isinstance(c, PositionalConstraint)
         assert c.value is True
+
+
+# ===========================================================================
+# Import declarations (ES-5)
+# ===========================================================================
+
+class TestParseImport:
+    """``import`` and ``from … import`` at the top level."""
+
+    def test_import_class(self) -> None:
+        prog = _parse("import rete.fact.Fact")
+        assert len(prog.imports) == 1
+        assert prog.imports[0].names == (("rete.fact.Fact", "Fact"),)
+
+    def test_import_class_with_alias(self) -> None:
+        prog = _parse("import rete.fact.Fact as F")
+        assert prog.imports[0].names == (("rete.fact.Fact", "F"),)
+
+    def test_from_import_single(self) -> None:
+        prog = _parse("from rete.fact import Fact")
+        assert prog.imports[0].names == (("rete.fact.Fact", "Fact"),)
+
+    def test_from_import_with_alias(self) -> None:
+        prog = _parse("from rete.fact import Fact as F")
+        assert prog.imports[0].names == (("rete.fact.Fact", "F"),)
+
+    def test_from_import_multiple(self) -> None:
+        prog = _parse("from rete.fact import Fact, Token")
+        assert prog.imports[0].names == (
+            ("rete.fact.Fact", "Fact"),
+            ("rete.fact.Token", "Token"),
+        )
+
+    def test_from_import_multiple_with_aliases(self) -> None:
+        prog = _parse("from rete.fact import Fact as F, Token as T")
+        assert prog.imports[0].names == (
+            ("rete.fact.Fact", "F"),
+            ("rete.fact.Token", "T"),
+        )
+
+    def test_import_before_declare(self) -> None:
+        src = "import rete.fact.Fact\ndeclare Marker\nend"
+        prog = _parse(src)
+        assert len(prog.imports) == 1
+        assert len(prog.declares) == 1
+
+    def test_no_imports_gives_empty_tuple(self) -> None:
+        prog = _parse("declare Marker\nend")
+        assert prog.imports == ()
+
+    def test_multiple_import_stmts(self) -> None:
+        src = "import rete.fact.Fact\nfrom rete.fact import Token"
+        prog = _parse(src)
+        assert len(prog.imports) == 2

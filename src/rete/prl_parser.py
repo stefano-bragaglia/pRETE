@@ -10,6 +10,7 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    ImportDecl,
     NamedConstraint,
     NccPatternGroup,
     PatternNode,
@@ -71,14 +72,16 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_program(self) -> ProgramNode:
+        imports: list[ImportDecl] = []
         declares: list[DeclareDecl] = []
         rules: list[RuleDecl] = []
         while not self._at_end():
-            self._parse_top_level(declares, rules)
-        return ProgramNode(tuple(declares), tuple(rules))
+            self._parse_top_level(imports, declares, rules)
+        return ProgramNode(tuple(declares), tuple(rules), tuple(imports))
 
     def _parse_top_level(
         self,
+        imports: list[ImportDecl],
         declares: list[DeclareDecl],
         rules: list[RuleDecl],
     ) -> None:
@@ -89,12 +92,57 @@ class Parser:
             declares.append(self._parse_declare(tags))
         elif self._peek_kw("rule"):
             rules.append(self._parse_rule(tags))
+        elif self._try_import(imports):
+            pass
         else:
             t = self._peek()
             raise SyntaxError(
-                f"Expected 'package', 'declare', or 'rule' at line "
-                f"{getattr(t, 'line', '?')}, got {getattr(t, 'value', t)!r}"
+                f"Expected 'package', 'declare', 'rule', 'import', or 'from' "
+                f"at line {getattr(t, 'line', '?')}, got {getattr(t, 'value', t)!r}"
             )
+
+    def _try_import(self, imports: list[ImportDecl]) -> bool:
+        """Consume one import statement if present; return True when found."""
+        if self._peek_kw("import"):
+            imports.append(self._parse_import_stmt())
+            return True
+        if self._peek_kw("from"):
+            imports.append(self._parse_from_stmt())
+            return True
+        return False
+
+    def _parse_import_stmt(self) -> ImportDecl:
+        """Parse ``import a.b.ClassName [as Alias]``."""
+        self._expect("KW", "import")
+        qualified = self._parse_field_path()
+        alias = self._parse_optional_as() or qualified.rpartition(".")[2]
+        return ImportDecl(((qualified, alias),))
+
+    def _parse_from_stmt(self) -> ImportDecl:
+        """Parse ``from a.b import Name [as Alias] [, ...]``."""
+        self._expect("KW", "from")
+        module = self._parse_field_path()
+        self._expect("KW", "import")
+        return ImportDecl(self._parse_import_names(module))
+
+    def _parse_import_names(self, module: str) -> tuple[tuple[str, str], ...]:
+        names = [self._parse_one_import_name(module)]
+        while self._peek_punct(","):
+            self._advance()
+            names.append(self._parse_one_import_name(module))
+        return tuple(names)
+
+    def _parse_one_import_name(self, module: str) -> tuple[str, str]:
+        name = self._expect("IDENT").value
+        alias = self._parse_optional_as() or name
+        return (f"{module}.{name}", alias)
+
+    def _parse_optional_as(self) -> str | None:
+        """Consume ``as IDENT`` if present and return the alias; else None."""
+        if self._peek_kw("as"):
+            self._advance()
+            return self._expect("IDENT").value
+        return None
 
     def _skip_package(self) -> None:
         self._advance()  # consume 'package'
