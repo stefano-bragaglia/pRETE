@@ -563,6 +563,74 @@ class TestKeyField:
 
 
 # ===========================================================================
+# Shorthand constraint patterns (ES-4)
+# ===========================================================================
+
+class TestShorthandPatterns:
+    """Integration: positional and named constraints match facts correctly."""
+
+    _POINT_SRC = "declare Point\n  x: int\n  y: int\nend\n"
+
+    def test_positional_both_match(self) -> None:
+        src = self._POINT_SRC + 'rule "r"\nwhen\n  Point(0, 0)\nthen\n  pass\nend'
+        _, _ = _setup(src)  # must compile without error
+
+    def test_positional_equivalent_to_compare(self) -> None:
+        pos = self._POINT_SRC + 'rule "r"\nwhen\n  Point(0, 0)\nthen\n  pass\nend'
+        cmp = self._POINT_SRC + \
+              'rule "r"\nwhen\n  Point(x == 0, y == 0)\nthen\n  pass\nend'
+        _, _ = _setup(pos)
+        _, _ = _setup(cmp)
+
+    def test_named_constraint_compiles(self) -> None:
+        src = self._POINT_SRC + 'rule "r"\nwhen\n  Point(y=0)\nthen\n  pass\nend'
+        _, _ = _setup(src)
+
+    def test_positional_fact_fires_rule(self) -> None:
+        src = (
+            self._POINT_SRC
+            + 'rule "origin"\nwhen\n  Point(0, 0)\nthen\n  results.append("hit")\nend'
+        )
+        engine, types = _setup(src)
+        results: list[str] = []
+        engine.network.conflict_set  # ensure network ready
+        for prod in engine.productions:
+            orig = prod.rhs
+            def _rhs(token, _orig=orig, _r=results):
+                _r.append("hit")
+            prod.rhs = _rhs
+        engine.add_fact(Fact(types["Point"](x=0, y=0)))
+        engine.run()
+        assert results == ["hit"]
+
+    def test_positional_non_matching_fact_does_not_fire(self) -> None:
+        fired: list[bool] = []
+        src = (
+            self._POINT_SRC
+            + 'rule "origin"\nwhen\n  Point(0, 0)\nthen\n  pass\nend'
+        )
+        engine, types = _setup(src)
+        for prod in engine.productions:
+            prod.rhs = lambda token: fired.append(True)
+        engine.add_fact(Fact(types["Point"](x=1, y=0)))
+        engine.run()
+        assert fired == []
+
+    def test_named_fact_fires_rule(self) -> None:
+        src = (
+            self._POINT_SRC
+            + 'rule "y-axis"\nwhen\n  Point(y=0)\nthen\n  pass\nend'
+        )
+        engine, types = _setup(src)
+        fired: list[bool] = []
+        for prod in engine.productions:
+            prod.rhs = lambda token: fired.append(True)
+        engine.add_fact(Fact(types["Point"](x=99, y=0)))
+        engine.run()
+        assert fired == [True]
+
+
+# ===========================================================================
 # Public API
 # ===========================================================================
 

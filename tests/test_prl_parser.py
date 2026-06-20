@@ -11,8 +11,10 @@ import pytest
 from rete.prl_ast import (
     BindConstraint,
     CompareConstraint,
+    NamedConstraint,
     NccPatternGroup,
     PatternNode,
+    PositionalConstraint,
     ProgramNode,
     RuleDecl,
     Tag,
@@ -468,3 +470,67 @@ class TestParseTags:
         """``@no-loop`` tag name is lexed as KW; parser must accept it."""
         rd = _first_rule('@no-loop\nrule "r" when\nthen\npass\nend')
         assert rd.tags[0].name == "no-loop"
+
+
+# ===========================================================================
+# Shorthand constraints (ES-4)
+# ===========================================================================
+
+class TestParseShorthandConstraints:
+    """Positional and named-keyword constraint forms."""
+
+    def test_positional_single_int(self) -> None:
+        c = _first_constraint("Point(0)")
+        assert isinstance(c, PositionalConstraint)
+        assert c.value == 0
+
+    def test_positional_two_values(self) -> None:
+        pat = _lhs_cond("Point(0, 0)")
+        assert len(pat.constraints) == 2
+        assert all(isinstance(c, PositionalConstraint) for c in pat.constraints)
+
+    def test_positional_string_value(self) -> None:
+        c = _first_constraint('Order("open")')
+        assert isinstance(c, PositionalConstraint)
+        assert c.value == "open"
+
+    def test_positional_variable_reference(self) -> None:
+        c = _first_constraint("Point($x)")
+        assert isinstance(c, PositionalConstraint)
+        assert c.value == "$x"
+
+    def test_named_single(self) -> None:
+        c = _first_constraint("Point(y=0)")
+        assert isinstance(c, NamedConstraint)
+        assert c.field == "y"
+        assert c.value == 0
+
+    def test_named_string_value(self) -> None:
+        c = _first_constraint('Order(status="open")')
+        assert isinstance(c, NamedConstraint)
+        assert c.value == "open"
+
+    def test_mixed_positional_and_named(self) -> None:
+        pat = _lhs_cond("Point(0, y=1)")
+        assert isinstance(pat.constraints[0], PositionalConstraint)
+        assert isinstance(pat.constraints[1], NamedConstraint)
+
+    def test_named_and_bind_coexist(self) -> None:
+        pat = _lhs_cond("Point($v: x, y=1)")
+        assert isinstance(pat.constraints[0], BindConstraint)
+        assert isinstance(pat.constraints[1], NamedConstraint)
+
+    def test_named_and_compare_coexist(self) -> None:
+        pat = _lhs_cond('Order(status="open", amount > 100)')
+        assert isinstance(pat.constraints[0], NamedConstraint)
+        assert isinstance(pat.constraints[1], CompareConstraint)
+
+    def test_positional_negative_number(self) -> None:
+        c = _first_constraint("Point(-1)")
+        assert isinstance(c, PositionalConstraint)
+        assert c.value == -1
+
+    def test_positional_bool(self) -> None:
+        c = _first_constraint("Flag(true)")
+        assert isinstance(c, PositionalConstraint)
+        assert c.value is True

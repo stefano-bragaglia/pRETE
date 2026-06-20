@@ -12,8 +12,10 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    NamedConstraint,
     NccPatternGroup,
     PatternNode,
+    PositionalConstraint,
     ProgramNode,
     RuleDecl,
     Tag,
@@ -121,6 +123,56 @@ class TestDeclareDecl:
         fields = (FieldDecl("v", "int"),)
         assert DeclareDecl("T", fields) == DeclareDecl("T", fields)
         assert DeclareDecl("T", fields) != DeclareDecl("X", fields)
+
+
+# ===========================================================================
+# PositionalConstraint (ES-4)
+# ===========================================================================
+
+class TestPositionalConstraint:
+    """``PositionalConstraint`` is a frozen dataclass holding a bare value."""
+
+    def test_construction_int(self) -> None:
+        pc = PositionalConstraint(42)
+        assert pc.value == 42
+
+    def test_construction_none(self) -> None:
+        assert PositionalConstraint(None).value is None
+
+    def test_frozen(self) -> None:
+        with pytest.raises(AttributeError):
+            PositionalConstraint(1).value = 2  # type: ignore[misc]
+
+    def test_structural_equality(self) -> None:
+        assert PositionalConstraint(1) == PositionalConstraint(1)
+        assert PositionalConstraint(1) != PositionalConstraint(2)
+
+    def test_hashable(self) -> None:
+        assert hash(PositionalConstraint(1)) == hash(PositionalConstraint(1))
+
+
+# ===========================================================================
+# NamedConstraint (ES-4)
+# ===========================================================================
+
+class TestNamedConstraint:
+    """``NamedConstraint`` is a frozen dataclass for ``field=value`` syntax."""
+
+    def test_construction(self) -> None:
+        nc = NamedConstraint("status", "open")
+        assert nc.field == "status"
+        assert nc.value == "open"
+
+    def test_frozen(self) -> None:
+        with pytest.raises(AttributeError):
+            NamedConstraint("f", 1).field = "g"  # type: ignore[misc]
+
+    def test_structural_equality(self) -> None:
+        assert NamedConstraint("f", 1) == NamedConstraint("f", 1)
+        assert NamedConstraint("f", 1) != NamedConstraint("g", 1)
+
+    def test_hashable(self) -> None:
+        assert hash(NamedConstraint("f", 1)) == hash(NamedConstraint("f", 1))
 
 
 # ===========================================================================
