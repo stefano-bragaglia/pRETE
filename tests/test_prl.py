@@ -397,3 +397,15 @@ class TestEndToEnd:
         engine.run()
         assert len(alerts) == 1
         assert "S2" in alerts[0].message
+
+
+# ===========================================================================
+# Public API
+# ===========================================================================
+
+class TestPublicApi:
+    """``load_prl`` is re-exported from the top-level ``rete`` package."""
+
+    def test_load_prl_importable_from_rete(self) -> None:
+        from rete import load_prl as _lp
+        assert callable(_lp)
