@@ -712,3 +712,57 @@ class TestParseForall:
         lhs = _parse(src).rules[0].lhs
         assert len(lhs) == 1
         assert isinstance(lhs[0], ForallNode)
+
+
+# ===========================================================================
+# exists (ES-7)
+# ===========================================================================
+
+
+class TestParseExists:
+    """``exists Pattern(…)`` sets ``exists=True`` on the PatternNode."""
+
+    def test_exists_traditional(self) -> None:
+        src = 'rule "r"\nwhen\n  exists Invoice()\nthen\nend'
+        pat = _parse(src).rules[0].lhs[0]
+        assert isinstance(pat, PatternNode)
+        assert pat.exists is True
+        assert pat.negated is False
+
+    def test_exists_with_constraint(self) -> None:
+        src = 'rule "r"\nwhen\n  exists Invoice(overdue == true)\nthen\nend'
+        pat = _parse(src).rules[0].lhs[0]
+        assert pat.exists is True
+        assert len(pat.constraints) == 1
+
+    def test_exists_with_join_constraint(self) -> None:
+        src = (
+            'rule "r"\nwhen\n'
+            '  $acc: Account()\n'
+            '  exists Invoice(accountId == $acc.id)\n'
+            'then\nend'
+        )
+        exists_pat = _parse(src).rules[0].lhs[1]
+        assert isinstance(exists_pat, PatternNode)
+        assert exists_pat.exists is True
+
+    def test_exists_no_fact_var(self) -> None:
+        src = 'rule "r"\nwhen\n  exists Invoice()\nthen\nend'
+        assert _parse(src).rules[0].lhs[0].fact_var is None
+
+    def test_exists_fact_var_raises(self) -> None:
+        src = 'rule "r"\nwhen\n  $inv: exists Invoice()\nthen\nend'
+        with pytest.raises((SyntaxError, Exception)):
+            _parse(src)
+
+    def test_exists_is_single_lhs_node(self) -> None:
+        src = (
+            'rule "r"\nwhen\n'
+            '  $acc: Account()\n'
+            '  exists Invoice()\n'
+            'then\nend'
+        )
+        lhs = _parse(src).rules[0].lhs
+        assert len(lhs) == 2
+        assert isinstance(lhs[1], PatternNode)
+        assert lhs[1].exists is True

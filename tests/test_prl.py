@@ -807,6 +807,56 @@ class TestForallIntegration:
         engine.run()
         assert results == ["ok"]
 
+
+# ===========================================================================
+# exists integration (ES-7)
+# ===========================================================================
+
+
+class TestExistsIntegration:
+    """End-to-end: exists fires once per left-token regardless of right count."""
+
+    _SRC = (
+        "declare Account\n  name: str\nend\n"
+        "declare Invoice\n  overdue: bool\nend\n"
+        'rule "alert"\n'
+        "when\n"
+        "  $acc: Account()\n"
+        "  exists Invoice(overdue == true)\n"
+        "then\n"
+        "  results.append(acc.obj.name)\n"
+        "end\n"
+    )
+
+    def test_fires_once_with_two_invoices(self) -> None:
+        """Rule fires once per account even when two matching invoices exist."""
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Account"](name="alice")))
+        engine.add_fact(Fact(types["Invoice"](overdue=True)))
+        engine.add_fact(Fact(types["Invoice"](overdue=True)))
+        engine.run()
+        assert results.count("alice") == 1
+
+    def test_does_not_fire_without_invoice(self) -> None:
+        """Rule does not fire when no overdue invoice exists."""
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Account"](name="alice")))
+        engine.run()
+        assert results == []
+
+    def test_retract_last_invoice_clears_activation(self) -> None:
+        """Retracting the last matching invoice removes the pending activation."""
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Account"](name="alice")))
+        invoice = Fact(types["Invoice"](overdue=True))
+        engine.add_fact(invoice)
+        engine.remove_fact(invoice)
+        engine.run()
+        assert results == []
+
     def test_retracting_approval_unblocks(self) -> None:
         """Removing the Approval re-blocks the rule (retraction propagates)."""
         results: list[str] = []
