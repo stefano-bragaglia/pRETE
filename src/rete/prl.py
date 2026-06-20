@@ -479,7 +479,7 @@ def _compile_pattern(
         fact_bindings[node.fact_var] = idx
     constraints = _resolve_shorthand(node.constraints, type_)
     alpha_tests, join_tests, bindings = _compile_constraints(constraints)
-    return Pattern(type_, alpha_tests, join_tests, bindings, node.negated)
+    return Pattern(type_, alpha_tests, join_tests, bindings, node.negated, node.exists)
 
 
 def _resolve_shorthand(

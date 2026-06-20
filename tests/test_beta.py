@@ -8,6 +8,8 @@ from rete.alpha import AlphaMemory
 from rete.beta import (
     BetaMemory,
     DummyTopNode,
+    ExistsNode,
+    ExistsToken,
     Instantiation,
     JoinNode,
     JoinTest,
@@ -1000,3 +1002,193 @@ def test_ncc_owner_prefix_uses_fact_identity():
     result = Token(facts=(f_owner, f_sub))
     partner.left_activate(result)   # prefix (f_owner,) matches → count: 0→1 → retract
     assert rec.retracted == [owner_token]
+
+
+# ---------------------------------------------------------------------------
+# ExistsToken
+# ---------------------------------------------------------------------------
+
+
+def test_exists_token_default_count():
+    et = ExistsToken(token=Token())
+    assert et.count == 0
+
+
+# ---------------------------------------------------------------------------
+# ExistsNode helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_exists_node(tests=None, left=None):
+    """Return ``(ExistsNode, AlphaMemory, _Recorder)``."""
+    am = _any_am()
+    rec = _Recorder()
+    en = ExistsNode(
+        children=[rec],
+        alpha_memory=am,
+        left_input=left if left is not None else DummyTopNode(),
+        tests=tests or [],
+    )
+    am.successors.append(en)
+    return en, am, rec
+
+
+# ---------------------------------------------------------------------------
+# ExistsNode — left_activate
+# ---------------------------------------------------------------------------
+
+
+def test_exists_node_left_activate_no_right_no_emit():
+    """Empty alpha → count=0, no downstream emit."""
+    en, _am, rec = _make_exists_node()
+    t = Token()
+    en.left_activate(t)
+    assert rec.activated == []
+    assert en.items[0].count == 0
+
+
+def test_exists_node_left_activate_with_right_emits():
+    """Right fact already present → count=1, left token emitted downstream."""
+    en, am, rec = _make_exists_node()
+    am.items.append(Fact(Color("b1", "red")))
+    t = Token()
+    en.left_activate(t)
+    assert rec.activated == [t]
+    assert en.items[0].count == 1
+
+
+def test_exists_node_left_activate_emits_same_token():
+    """Downstream token is the unchanged left token, not an extended copy."""
+    en, am, rec = _make_exists_node()
+    am.items.append(Fact(Color("b1", "red")))
+    t = Token()
+    en.left_activate(t)
+    assert rec.activated[0] is t
+
+
+# ---------------------------------------------------------------------------
+# ExistsNode — right_activate
+# ---------------------------------------------------------------------------
+
+
+def test_exists_node_right_activate_zero_to_one_emits():
+    """Right fact arrives after left token → 0→1 transition emits token."""
+    en, _am, rec = _make_exists_node()
+    t = Token()
+    en.left_activate(t)  # count=0, not emitted
+    assert rec.activated == []
+    f = Fact(Color("b1", "red"))
+    en.right_activate(f)
+    assert rec.activated == [t]
+    assert en.items[0].count == 1
+
+
+def test_exists_node_right_activate_one_to_two_no_second_emit():
+    """Second right fact → count 1→2, no duplicate downstream emit."""
+    en, am, rec = _make_exists_node()
+    am.items.append(Fact(Color("b1", "red")))
+    t = Token()
+    en.left_activate(t)  # count=1, emitted
+    rec.activated.clear()
+    f2 = Fact(Color("b2", "blue"))
+    en.right_activate(f2)
+    assert rec.activated == []
+    assert en.items[0].count == 2
+
+
+# ---------------------------------------------------------------------------
+# ExistsNode — right_retract
+# ---------------------------------------------------------------------------
+
+
+def test_exists_node_right_retract_two_to_one_no_retract():
+    """Count 2→1 when one of two right facts removed — no downstream retract."""
+    en, am, rec = _make_exists_node()
+    f1 = Fact(Color("b1", "red"))
+    f2 = Fact(Color("b2", "blue"))
+    am.items.extend([f1, f2])
+    t = Token()
+    en.left_activate(t)  # count=2
+    en.right_retract(f1)  # count 2→1
+    assert rec.retracted == []
+    assert en.items[0].count == 1
+
+
+def test_exists_node_right_retract_one_to_zero_retracts():
+    """Count 1→0 when last right fact removed — downstream token retracted."""
+    en, am, rec = _make_exists_node()
+    f = Fact(Color("b1", "red"))
+    am.items.append(f)
+    t = Token()
+    en.left_activate(t)  # count=1, emitted
+    en.right_retract(f)  # count 1→0
+    assert rec.retracted == [t]
+    assert en.items[0].count == 0
+
+
+# ---------------------------------------------------------------------------
+# ExistsNode — left_retract
+# ---------------------------------------------------------------------------
+
+
+def test_exists_node_left_retract_with_count_retracts_downstream():
+    """Left token retracted while count>0 → downstream token retracted."""
+    en, am, rec = _make_exists_node()
+    am.items.append(Fact(Color("b1", "red")))
+    t = Token()
+    en.left_activate(t)  # count=1, emitted
+    en.left_retract(t)
+    assert rec.retracted == [t]
+    assert en.items == []
+
+
+def test_exists_node_left_retract_count_zero_no_retract():
+    """Left token retracted while count=0 → no downstream retract, cleaned up."""
+    en, _am, rec = _make_exists_node()
+    t = Token()
+    en.left_activate(t)  # count=0, not emitted
+    en.left_retract(t)
+    assert rec.retracted == []
+    assert en.items == []
+
+
+# ---------------------------------------------------------------------------
+# ExistsNode — update_child
+# ---------------------------------------------------------------------------
+
+
+def test_exists_node_update_child_sends_emitted_only():
+    """Newly added child receives only tokens whose count > 0."""
+    en, _am, _rec = _make_exists_node()
+    f = Fact(Color("b1", "red"))
+    t0 = Token()
+    t1 = Token(facts=(f,))
+    en.items.append(ExistsToken(token=t0, count=0))
+    en.items.append(ExistsToken(token=t1, count=1))
+    new_child = _Recorder()
+    en.update_child(new_child)
+    assert new_child.activated == [t1]
+    assert new_child.retracted == []
+
+
+# ---------------------------------------------------------------------------
+# ExistsNode — right_unlink when beta empty
+# ---------------------------------------------------------------------------
+
+
+def test_exists_node_right_unlink_state_when_beta_empty():
+    """ExistsNode right-unlinks when constructed with an empty BetaMemory."""
+    am = _any_am()
+    rec = _Recorder()
+    bm = BetaMemory()  # empty
+    en = ExistsNode(
+        children=[rec],
+        alpha_memory=am,
+        left_input=bm,
+        tests=[],
+    )
+    # Simulate _init_exists_node_links for empty beta
+    en.right_unlinked = True
+    bm.successors.append(en)
+    assert en.right_unlinked is True
+    assert en not in am.successors

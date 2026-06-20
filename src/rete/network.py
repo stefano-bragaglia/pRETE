@@ -10,6 +10,7 @@ from rete.alpha import AlphaMemory, RootNode
 from rete.beta import (
     BetaMemory,
     DummyTopNode,
+    ExistsNode,
     Instantiation,
     JoinNode,
     JoinTest,
@@ -90,6 +91,8 @@ class ReteNetwork:
         p_node.parent_join = None
         if isinstance(jn, NegativeJoinNode):
             self._gc_negative_join_node(jn)
+        elif isinstance(jn, ExistsNode):
+            self._gc_exists_node(jn)
         elif isinstance(jn, NccNode):
             self._gc_ncc_node(jn)
         else:
@@ -101,7 +104,7 @@ class ReteNetwork:
 
     def _build_join_chain(
         self, lhs: list[Pattern | NccGroup]
-    ) -> JoinNode | NegativeJoinNode | NccNode:
+    ) -> JoinNode | NegativeJoinNode | ExistsNode | NccNode:
         """Build or share the join-node chain for *lhs*.
 
         :param lhs: ordered list of patterns / NCC groups from the production LHS
@@ -126,7 +129,7 @@ class ReteNetwork:
         pattern: Pattern,
         left: BetaMemory | DummyTopNode,
         earlier: list[Pattern],
-    ) -> JoinNode | NegativeJoinNode:
+    ) -> JoinNode | NegativeJoinNode | ExistsNode:
         """Compile one :class:`Pattern` into a join node, sharing if possible.
 
         :param pattern: the pattern to compile
@@ -137,6 +140,8 @@ class ReteNetwork:
         tests = JoinTest.extract(pattern, earlier)
         if pattern.negated:
             return self._build_or_share_negative_join_node(left, am, tests)
+        if pattern.exists:
+            return self._build_or_share_exists_node(left, am, tests)
         return self._build_or_share_join_node(left, am, tests, pattern)
 
     def _build_ncc(
@@ -305,6 +310,54 @@ class ReteNetwork:
             if isinstance(left, BetaMemory):
                 left.successors.append(njn)
 
+    def _build_or_share_exists_node(
+        self,
+        left: BetaMemory | DummyTopNode,
+        am: AlphaMemory,
+        tests: list[JoinTest],
+    ) -> ExistsNode:
+        """Return a matching existing ExistsNode or create and wire a new one.
+
+        Sharing key: ``left`` by identity, ``tests`` by value.
+
+        :param left: the left input — a :class:`BetaMemory` or :class:`DummyTopNode`
+        :param am: the alpha memory supplying Facts (right input)
+        :param tests: variable-consistency tests for this join
+        """
+        for en in am.successors:
+            if self._en_matches(en, left, tests):
+                return en
+        en = ExistsNode(
+            children=[], alpha_memory=am, left_input=left, tests=tests
+        )
+        self._init_exists_node_links(en, left, am)
+        en._initialize_from(left.items)
+        return en
+
+    def _init_exists_node_links(
+        self,
+        en: ExistsNode,
+        left: BetaMemory | DummyTopNode,
+        am: AlphaMemory,
+    ) -> None:
+        """Set initial link state for a newly built :class:`ExistsNode`.
+
+        Like :class:`NegativeJoinNode`, only right unlinking applies —
+        left-unlinking would prevent receiving future right activations needed
+        to trigger the 0→1 emit transition.
+
+        :param en: the newly created ExistsNode
+        :param left: its left input
+        :param am: its alpha memory (right input)
+        """
+        if isinstance(left, BetaMemory) and not left.items:
+            en.right_unlinked = True
+            left.successors.append(en)
+        else:
+            am.successors.append(en)
+            if isinstance(left, BetaMemory):
+                left.successors.append(en)
+
     @staticmethod
     def _join_key(
         left: BetaMemory | DummyTopNode,
@@ -362,8 +415,26 @@ class ReteNetwork:
             and njn.tests == tests
         )
 
+    @staticmethod
+    def _en_matches(
+        en: object,
+        left: BetaMemory | DummyTopNode,
+        tests: list[JoinTest],
+    ) -> bool:
+        """Return ``True`` iff *en* is a matching :class:`ExistsNode`.
+
+        :param en: candidate node from ``am.successors``
+        :param left: expected left input
+        :param tests: expected join tests
+        """
+        return (
+            isinstance(en, ExistsNode)
+            and en.left_input is left
+            and en.tests == tests
+        )
+
     def _build_or_share_beta_memory(
-        self, parent_join: JoinNode | NegativeJoinNode | NccNode
+        self, parent_join: JoinNode | NegativeJoinNode | ExistsNode | NccNode
     ) -> BetaMemory:
         """Return the existing BetaMemory child of *parent_join* or create one.
 
@@ -414,6 +485,20 @@ class ReteNetwork:
         if isinstance(njn.left_input, BetaMemory):
             njn.left_input.successors.remove(njn)
             self._gc_beta_memory(njn.left_input)
+
+    def _gc_exists_node(self, en: ExistsNode) -> None:
+        """Remove *en* from the network if it has no remaining children.
+
+        :param en: the ExistsNode to potentially garbage-collect
+        :see: Doorenbos Appendix A ``delete-node-and-any-unused-ancestors``
+        """
+        if en.children:
+            return
+        if not en.right_unlinked:
+            en.alpha_memory.successors.remove(en)
+        if isinstance(en.left_input, BetaMemory):
+            en.left_input.successors.remove(en)
+            self._gc_beta_memory(en.left_input)
 
     def _gc_ncc_node(self, ncc: NccNode) -> None:
         """Remove *ncc* from the network if it has no remaining children.

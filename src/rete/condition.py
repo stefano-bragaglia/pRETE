@@ -52,6 +52,8 @@ class Pattern:
     :param join_tests: :class:`JoinSpec` references for cross-fact constraints
     :param bindings: ``(var_name, attr_name)`` pairs to extract on a match
     :param negated: if ``True``, production fires only when no match exists
+    :param exists: if ``True``, production fires when at least one match exists
+        (fires once per left token, not once per matching right fact)
     :see: UPDATE_PLAN §Step 2
     """
 
@@ -60,6 +62,7 @@ class Pattern:
     join_tests: tuple[JoinSpec, ...] = ()
     bindings: tuple[tuple[str, str], ...] = ()
     negated: bool = False
+    exists: bool = False
 
     def matches(self, fact: Fact) -> bool:
         """Return ``True`` iff *fact* passes the type check and all alpha tests.

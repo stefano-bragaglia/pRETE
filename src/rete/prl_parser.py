@@ -263,7 +263,14 @@ class Parser:
             return self._parse_negated()
         if self._peek_kw("forall"):
             return self._parse_forall()
+        if self._peek_kw("exists"):
+            return self._parse_exists()
         return self._parse_pattern()
+
+    def _parse_exists(self) -> PatternNode:
+        """Parse ``exists Pattern(…)`` — existential check without binding."""
+        self._expect("KW", "exists")
+        return self._parse_pattern(exists=True)
 
     def _parse_negated(self) -> PatternNode | NccPatternGroup:
         self._expect("KW", "not")
@@ -295,11 +302,15 @@ class Parser:
     # Patterns
     # ------------------------------------------------------------------
 
-    def _parse_pattern(self, negated: bool = False) -> PatternNode:
+    def _parse_pattern(
+        self, negated: bool = False, exists: bool = False
+    ) -> PatternNode:
         fact_var = self._try_fact_binding()
+        if fact_var and (exists or self._peek_kw("exists")):
+            raise SyntaxError("'exists' patterns cannot bind a fact variable")
         if self._peek_punct("/"):
-            return self._parse_oopath(fact_var, negated)
-        return self._parse_traditional(fact_var, negated)
+            return self._parse_oopath(fact_var, negated, exists)
+        return self._parse_traditional(fact_var, negated, exists)
 
     def _try_fact_binding(self) -> str | None:
         t = self._peek()
@@ -316,7 +327,7 @@ class Parser:
         return t.kind == "PUNCT" and t.value == ":"
 
     def _parse_oopath(
-        self, fact_var: str | None, negated: bool
+        self, fact_var: str | None, negated: bool, exists: bool = False
     ) -> PatternNode:
         self._expect("PUNCT", "/")
         type_name = self._expect("IDENT").value
@@ -325,10 +336,10 @@ class Parser:
             self._advance()
             constraints = self._parse_constraints("]")
             self._expect("PUNCT", "]")
-        return PatternNode(type_name, fact_var, constraints, negated)
+        return PatternNode(type_name, fact_var, constraints, negated, exists)
 
     def _parse_traditional(
-        self, fact_var: str | None, negated: bool
+        self, fact_var: str | None, negated: bool, exists: bool = False
     ) -> PatternNode:
         type_name = self._expect("IDENT").value
         self._expect("PUNCT", "(")
@@ -336,7 +347,7 @@ class Parser:
         if not self._peek_punct(")"):
             constraints = self._parse_constraints(")")
         self._expect("PUNCT", ")")
-        return PatternNode(type_name, fact_var, constraints, negated)
+        return PatternNode(type_name, fact_var, constraints, negated, exists)
 
     # ------------------------------------------------------------------
     # Constraints
