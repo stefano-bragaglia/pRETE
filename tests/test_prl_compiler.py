@@ -628,3 +628,105 @@ class TestCompileImport:
             assert issubclass(resolved["Child"], Base)
         finally:
             del sys.modules["_es5_compiler_mod"]
+
+
+# ===========================================================================
+# or disjunction compilation (ES-6)
+# ===========================================================================
+
+class TestCompileOr:
+    """``or`` rule compiles to K productions sharing the same RHS."""
+
+    @staticmethod
+    def _types() -> dict:
+        from dataclasses import make_dataclass
+        return {
+            "A": make_dataclass("A", [("v", int)]),
+            "B": make_dataclass("B", [("v", int)]),
+        }
+
+    def test_two_branch_or_produces_two_productions(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        _, prods = load_prl(src, types=self._types())
+        assert len(prods) == 2
+
+    def test_three_branch_or_produces_three_productions(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B() or\n  A()\nthen\nend'
+        _, prods = load_prl(src, types=self._types())
+        assert len(prods) == 3
+
+    def test_non_or_rule_produces_one_production(self) -> None:
+        src = 'rule "r"\nwhen\n  A()\nthen\nend'
+        _, prods = load_prl(src, types=self._types())
+        assert len(prods) == 1
+
+    def test_mismatched_branch_vars_raises(self) -> None:
+        """All or-branches must bind the same variable set."""
+        src = 'rule "r"\nwhen\n  $x: A() or\n  $y: B()\nthen\nend'
+        with pytest.raises(SyntaxError, match="branch"):
+            load_prl(src, types=self._types())
+
+    def test_or_first_branch_lhs_correct_type(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        types = self._types()
+        _, prods = load_prl(src, types=types)
+        assert prods[0].lhs[0].type_ is types["A"]
+        assert prods[1].lhs[0].type_ is types["B"]
+
+    def test_matching_fact_vars_do_not_raise(self) -> None:
+        src = 'rule "r"\nwhen\n  $x: A() or\n  $x: B()\nthen\nend'
+        _, prods = load_prl(src, types=self._types())
+        assert len(prods) == 2
+
+    def test_or_no_loop_propagates_to_all_branches(self) -> None:
+        src = 'rule "r"\n  no-loop\nwhen\n  A() or\n  B()\nthen\nend'
+        _, prods = load_prl(src, types=self._types())
+        assert all(p.no_loop for p in prods)
+
+
+# ===========================================================================
+# forall compilation (ES-6)
+# ===========================================================================
+
+class TestCompileForall:
+    """``forall(P, Q)`` compiles to an NccGroup."""
+
+    @staticmethod
+    def _types() -> dict:
+        from dataclasses import make_dataclass
+        return {
+            "Order": make_dataclass("Order", [("status", str)]),
+            "Approval": make_dataclass("Approval", [("ref", str)]),
+        }
+
+    def test_forall_produces_ncc_group(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        _, prods = load_prl(src, types=self._types())
+        assert len(prods) == 1
+        assert isinstance(prods[0].lhs[0], NccGroup)
+
+    def test_forall_ncc_has_two_patterns(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        _, prods = load_prl(src, types=self._types())
+        ncc = prods[0].lhs[0]
+        assert len(ncc.conditions) == 2
+
+    def test_forall_second_pattern_is_negated(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        _, prods = load_prl(src, types=self._types())
+        ncc = prods[0].lhs[0]
+        assert ncc.conditions[1].negated is True
+
+    def test_forall_first_pattern_not_negated(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        _, prods = load_prl(src, types=self._types())
+        ncc = prods[0].lhs[0]
+        assert ncc.conditions[0].negated is False
+
+    def test_forall_condition_types_correct(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        types = self._types()
+        _, prods = load_prl(src, types=types)
+        ncc = prods[0].lhs[0]
+        assert ncc.conditions[0].type_ is types["Order"]
+        assert ncc.conditions[1].type_ is types["Approval"]

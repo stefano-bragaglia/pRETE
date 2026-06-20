@@ -11,8 +11,10 @@ import pytest
 from rete.prl_ast import (
     BindConstraint,
     CompareConstraint,
+    ForallNode,
     NamedConstraint,
     NccPatternGroup,
+    OrGroup,
     PatternNode,
     PositionalConstraint,
     ProgramNode,
@@ -588,3 +590,119 @@ class TestParseImport:
         src = "import rete.fact.Fact\nfrom rete.fact import Token"
         prog = _parse(src)
         assert len(prog.imports) == 2
+
+
+# ===========================================================================
+# or disjunction (ES-6)
+# ===========================================================================
+
+class TestParseOr:
+    """``or`` keyword splits the LHS into an ``OrGroup``."""
+
+    def test_two_branch_or(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        prog = _parse(src)
+        assert len(prog.rules[0].lhs) == 1
+        og = prog.rules[0].lhs[0]
+        assert isinstance(og, OrGroup)
+        assert len(og.branches) == 2
+        assert og.branches[0][0].type_name == "A"
+        assert og.branches[1][0].type_name == "B"
+
+    def test_three_branch_or(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B() or\n  C()\nthen\nend'
+        prog = _parse(src)
+        og = prog.rules[0].lhs[0]
+        assert isinstance(og, OrGroup)
+        assert len(og.branches) == 3
+
+    def test_multi_condition_branch(self) -> None:
+        """Each branch may contain multiple conditions."""
+        src = 'rule "r"\nwhen\n  A()\n  B() or\n  C()\nthen\nend'
+        prog = _parse(src)
+        og = prog.rules[0].lhs[0]
+        assert isinstance(og, OrGroup)
+        assert len(og.branches[0]) == 2
+        assert len(og.branches[1]) == 1
+
+    def test_no_or_gives_flat_tuple(self) -> None:
+        src = 'rule "r"\nwhen\n  A()\nthen\nend'
+        prog = _parse(src)
+        lhs = prog.rules[0].lhs
+        assert not any(isinstance(n, OrGroup) for n in lhs)
+        assert lhs[0].type_name == "A"
+
+    def test_or_with_fact_binding(self) -> None:
+        src = 'rule "r"\nwhen\n  $x: A() or\n  $x: B()\nthen\nend'
+        prog = _parse(src)
+        og = prog.rules[0].lhs[0]
+        assert og.branches[0][0].fact_var == "$x"
+        assert og.branches[1][0].fact_var == "$x"
+
+    def test_or_with_constraints(self) -> None:
+        src = 'rule "r"\nwhen\n  A(x == 1) or\n  B(y == 2)\nthen\nend'
+        prog = _parse(src)
+        og = prog.rules[0].lhs[0]
+        assert isinstance(og, OrGroup)
+        assert len(og.branches[0][0].constraints) == 1
+
+    def test_or_branches_are_tuples(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        og = _parse(src).rules[0].lhs[0]
+        assert isinstance(og.branches, tuple)
+        assert all(isinstance(b, tuple) for b in og.branches)
+
+
+# ===========================================================================
+# forall (ES-6)
+# ===========================================================================
+
+class TestParseForall:
+    """``forall(P, Q)`` produces a ``ForallNode``."""
+
+    def test_basic_forall(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        prog = _parse(src)
+        assert len(prog.rules[0].lhs) == 1
+        fn = prog.rules[0].lhs[0]
+        assert isinstance(fn, ForallNode)
+        assert fn.pattern.type_name == "Order"
+        assert fn.condition.type_name == "Approval"
+
+    def test_forall_with_constraint_on_P(self) -> None:
+        src = (
+            'rule "r"\nwhen\n'
+            '  forall(\n'
+            '    Order(status == "pending"),\n'
+            '    Approval()\n'
+            '  )\nthen\nend'
+        )
+        prog = _parse(src)
+        fn = prog.rules[0].lhs[0]
+        assert isinstance(fn, ForallNode)
+        c = fn.pattern.constraints[0]
+        assert isinstance(c, CompareConstraint)
+        assert c.op == "=="
+
+    def test_forall_with_fact_binding_in_P(self) -> None:
+        src = 'rule "r"\nwhen\n  forall($o: Order(), Approval())\nthen\nend'
+        prog = _parse(src)
+        fn = prog.rules[0].lhs[0]
+        assert fn.pattern.fact_var == "$o"
+
+    def test_forall_condition_has_no_fact_var_by_default(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        prog = _parse(src)
+        fn = prog.rules[0].lhs[0]
+        assert fn.condition.fact_var is None
+
+    def test_missing_comma_raises(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order() Approval())\nthen\nend'
+        with pytest.raises(SyntaxError):
+            _parse(src)
+
+    def test_forall_is_single_lhs_node(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        lhs = _parse(src).rules[0].lhs
+        assert len(lhs) == 1
+        assert isinstance(lhs[0], ForallNode)
