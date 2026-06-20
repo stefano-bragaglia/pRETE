@@ -13,6 +13,13 @@ matching over arbitrary Python objects (POPOs — Plain Old Python Objects).
 > directly into the engine via `load_prl()`.  The RETE engine itself is
 > unchanged.
 
+> **v2.5.0 — PRL Extra Features (in progress):** extending PRL with type
+> inheritance (`extends`), metadata tags (`@key`, `@no-loop`, `@role`,
+> `@timestamp`, `@expires`, `@duration`), positional/named constraint shorthand,
+> `import`, `or` disjunction, `forall`, `exists`, CEP event semantics, and
+> `accumulate`.  Engine changes are confined to `exists` (new `ExistsNode`),
+> CEP (`logical_clock`, event expiry), and `accumulate` (new `AccumulateNode`).
+
 ![pRETE logo](images/pRETE-logo-small.png)
 
 ## Background
