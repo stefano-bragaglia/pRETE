@@ -277,12 +277,12 @@ objects and hands them to the engine.
 ```
 // temperature_alarm.prl
 declare Temperature
-  sensor: String
-  value:  double
+  sensor: str
+  value:  float
 end
 
 declare Alert
-  message: String
+  message: str
 end
 
 rule "Too Hot"
@@ -290,14 +290,13 @@ rule "Too Hot"
   when
     $t: /Temperature[value >= 80]
   then
-    insert(Alert("Sensor " + t.sensor + " too hot"))
+    insert(Alert("Sensor " + t.obj.sensor + " too hot"))
 end
 ```
 
 ```python
 from pathlib import Path
-from rete import Fact, InferenceEngine
-from rete.prl import load_prl
+from rete import Fact, InferenceEngine, load_prl
 
 engine = InferenceEngine()
 types, productions = load_prl(
