@@ -8,6 +8,11 @@ matching over arbitrary Python objects (POPOs — Plain Old Python Objects).
 > `WME`, `Condition`, and `WILDCARD` are removed; use `Fact`, `Pattern`, and
 > `JoinSpec` instead.  See [CHANGELOG.md](CHANGELOG.md).
 
+> **v2.1.0 — pRETE Rule Language (PRL):** rules can now be written in `.prl`
+> text files (a Python-flavoured subset of Drools Rule Language) and loaded
+> directly into the engine via `load_prl()`.  The RETE engine itself is
+> unchanged.
+
 ![pRETE logo](images/pRETE-logo-small.png)
 
 ## Background
@@ -245,6 +250,71 @@ needed.
 
 ---
 
+## pRETE Rule Language (PRL)
+
+PRL is a text notation for writing rules without touching Python — a strict
+subset of [Drools Rule Language](https://docs.drools.org) adapted for pRETE.
+Rules live in `.prl` files; `load_prl()` compiles them into `Production`
+objects and hands them to the engine.
+
+### What PRL supports
+
+| Construct | Example |
+|---|---|
+| Fact-type declaration | `declare Temperature value: double end` |
+| OOPath pattern | `/Temperature[value >= 80]` |
+| Traditional pattern | `Temperature(value >= 80)` |
+| Fact binding | `$t: /Temperature[value >= 80]` |
+| Field binding | `$v: value` inside `[…]` |
+| Cross-fact join | `field == $bound_var` |
+| Single negation | `not /Temperature[value < 0]` |
+| Conjunctive negation (NCC) | `not ( Pattern1() Pattern2() )` |
+| Rule salience | `salience 10` |
+| RHS helpers | `insert(obj)`, `retract(obj)`, `update(obj)` |
+
+### Quick start
+
+```
+// temperature_alarm.prl
+declare Temperature
+  sensor: String
+  value:  double
+end
+
+declare Alert
+  message: String
+end
+
+rule "Too Hot"
+  salience 10
+  when
+    $t: /Temperature[value >= 80]
+  then
+    insert(Alert("Sensor " + t.sensor + " too hot"))
+end
+```
+
+```python
+from pathlib import Path
+from rete import Fact, InferenceEngine
+from rete.prl import load_prl
+
+engine = InferenceEngine()
+types, productions = load_prl(
+    Path("temperature_alarm.prl").read_text(), engine=engine
+)
+for p in productions:
+    engine.add_production(p)
+
+Temperature = types["Temperature"]
+engine.add_fact(Fact(Temperature(sensor="S1", value=95.0)))
+engine.run()
+```
+
+The grammar is documented in [`reference/prl-grammar.ebnf`](reference/prl-grammar.ebnf).
+
+---
+
 ## Bundled examples
 
 ```bash
@@ -278,6 +348,7 @@ pytest --cov
 ---
 
 ## History
+- **v2.1.0** — PRL parser: `load_prl()`, `.prl` files, lexer / AST / compiler pipeline
 - **v2.0.0** — Drools-style POPO matching: `Fact`, `Pattern`, `JoinSpec`; `update_fact`; MRO dispatch; named variable bindings on `Token`
 - **v1.0.1** — incremental fixes
 - **v1.0.0** — triple WME model (`WME`, `Condition`)

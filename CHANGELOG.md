@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] — 2026-06-20
+
+**Extending API change — pRETE Rule Language (PRL) parser added.**
+
+### Added
+- `rete.prl.load_prl(text, types, engine)` — parses PRL source into
+  `(dict[str, type], list[Production])` ready for the RETE engine.
+- `src/rete/prl_lexer.py` — tokenizer for PRL source text.
+- `src/rete/prl_ast.py` — frozen AST dataclasses (`FieldDecl`, `DeclareDecl`,
+  `BindConstraint`, `CompareConstraint`, `PatternNode`, `NccPatternGroup`,
+  `RuleDecl`, `ProgramNode`).
+- `src/rete/prl_parser.py` — hand-written recursive-descent parser.
+- `src/rete/prl.py` — compiler (AST → `Pattern` / `NccGroup` / `Production`)
+  and `load_prl()` entry point.
+- `.prl` program files for all seven bundled examples
+  (`src/examples/prl/*.prl`).
+- PRL-powered companion drivers for all seven examples
+  (`src/examples/*_prl.py`).
+- Per-step unit tests: `test_prl_lexer.py`, `test_prl_ast.py`,
+  `test_prl_parser.py`, `test_prl_compiler.py`.
+- Full-pipeline integration tests: `test_prl.py`.
+
+### Changed
+- `src/rete/__init__.py` — `load_prl` added to public re-exports and `__all__`.
+
+### Notes
+- The engine, network, alpha, and beta modules are **unchanged**.
+- PRL is a strict subset of Drools Rule Language (DRL 8.x); see
+  `reference/prl-grammar.ebnf` for the full grammar.
+- `salience` is parsed and preserved on `RuleDecl` (default 0) but not yet
+  wired into `InferenceEngine`'s conflict-set strategy.
+- The regex-based `drl.py` prototype is superseded by `prl.py` and will be
+  removed in a future release.
+
+---
+
 ## [2.0.0] — 2026-06-19
 
 **Breaking API change — triple model replaced by Plain Old Python Objects (POPOs).**
