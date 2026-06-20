@@ -10,9 +10,11 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    ForallNode,
     ImportDecl,
     NamedConstraint,
     NccPatternGroup,
+    OrGroup,
     PatternNode,
     PositionalConstraint,
     ProgramNode,
@@ -237,15 +239,30 @@ class Parser:
     # LHS and conditions
     # ------------------------------------------------------------------
 
-    def _parse_lhs(self) -> tuple[PatternNode | NccPatternGroup, ...]:
-        conds: list[PatternNode | NccPatternGroup] = []
-        while not self._peek_kw("then"):
-            conds.append(self._parse_condition())
-        return tuple(conds)
+    def _parse_lhs(self) -> tuple:
+        """Parse the LHS condition list, handling ``or`` branches.
 
-    def _parse_condition(self) -> PatternNode | NccPatternGroup:
+        Returns a flat tuple of conditions when no ``or`` is found,
+        or a single-element tuple containing an :class:`OrGroup` otherwise.
+        """
+        branches: list[tuple] = []
+        current: list = []
+        while not self._peek_kw("then"):
+            current.append(self._parse_condition())
+            if self._peek_kw("or"):
+                self._advance()
+                branches.append(tuple(current))
+                current = []
+        if not branches:
+            return tuple(current)
+        branches.append(tuple(current))
+        return (OrGroup(tuple(branches)),)
+
+    def _parse_condition(self) -> PatternNode | NccPatternGroup | ForallNode:
         if self._peek_kw("not"):
             return self._parse_negated()
+        if self._peek_kw("forall"):
+            return self._parse_forall()
         return self._parse_pattern()
 
     def _parse_negated(self) -> PatternNode | NccPatternGroup:
@@ -263,6 +280,16 @@ class Parser:
             raise SyntaxError("NCC group requires at least one pattern")
         self._expect("PUNCT", ")")
         return NccPatternGroup(tuple(patterns))
+
+    def _parse_forall(self) -> ForallNode:
+        """Parse ``forall(P, Q)`` — two comma-separated patterns in parens."""
+        self._expect("KW", "forall")
+        self._expect("PUNCT", "(")
+        pattern = self._parse_pattern()
+        self._expect("PUNCT", ",")
+        condition = self._parse_pattern()
+        self._expect("PUNCT", ")")
+        return ForallNode(pattern, condition)
 
     # ------------------------------------------------------------------
     # Patterns

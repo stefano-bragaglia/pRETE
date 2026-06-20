@@ -423,7 +423,7 @@ class NccPartnerNode:
 
     ncc_node: NccNode = field(repr=False)
     items: list[Token] = field(default_factory=list)
-    sub_last_join: JoinNode = field(init=False, repr=False)
+    sub_last_join: JoinNode | NegativeJoinNode = field(init=False, repr=False)
 
     def left_activate(self, token: Token) -> None:
         """Forward *token* to the NCC node, buffering if no owner token yet.

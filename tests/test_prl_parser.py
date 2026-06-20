@@ -599,13 +599,19 @@ class TestParseImport:
 class TestParseOr:
     """``or`` keyword splits the LHS into an ``OrGroup``."""
 
-    def test_two_branch_or(self) -> None:
+    def test_two_branch_or_yields_or_group(self) -> None:
         src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
-        prog = _parse(src)
-        assert len(prog.rules[0].lhs) == 1
-        og = prog.rules[0].lhs[0]
+        og = _parse(src).rules[0].lhs[0]
         assert isinstance(og, OrGroup)
+
+    def test_two_branch_or_branch_count(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        og = _parse(src).rules[0].lhs[0]
         assert len(og.branches) == 2
+
+    def test_two_branch_or_type_names(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        og = _parse(src).rules[0].lhs[0]
         assert og.branches[0][0].type_name == "A"
         assert og.branches[1][0].type_name == "B"
 

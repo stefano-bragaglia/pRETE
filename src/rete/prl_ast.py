@@ -21,6 +21,8 @@ __all__ = [
     "NamedConstraint",
     "PatternNode",
     "NccPatternGroup",
+    "OrGroup",
+    "ForallNode",
     "RuleDecl",
     "ProgramNode",
 ]
@@ -162,6 +164,37 @@ class NccPatternGroup:
 
 
 @dataclass(frozen=True)
+class OrGroup:
+    """Disjunctive LHS — K mutually alternative condition sequences.
+
+    The compiler splits one ``RuleDecl`` containing an ``OrGroup`` into K
+    ``Production`` objects, each with the same RHS closure but a distinct
+    LHS branch.  All branches must bind the same set of ``$var`` names.
+
+    :param branches: each element is a full LHS sequence (a tuple of
+        ``PatternNode | NccPatternGroup``); at least two branches expected.
+    """
+
+    branches: tuple[tuple[PatternNode | NccPatternGroup, ...], ...]
+
+
+@dataclass(frozen=True)
+class ForallNode:
+    """Universal-quantification shorthand — ``forall(P, Q)``.
+
+    Fires when no fact matches P without a corresponding Q-fact.
+    Compiles to ``NccGroup([P_pattern, Q_negated_pattern])`` so the rule
+    fires when there is zero (P-without-Q) evidence in working memory.
+
+    :param pattern: the universally-quantified pattern P.
+    :param condition: the condition Q that must hold for every P.
+    """
+
+    pattern: PatternNode
+    condition: PatternNode
+
+
+@dataclass(frozen=True)
 class RuleDecl:
     """A complete rule declaration.
 
@@ -180,7 +213,7 @@ class RuleDecl:
     name: str
     salience: int = 0
     no_loop: bool = False
-    lhs: tuple[PatternNode | NccPatternGroup, ...] = ()
+    lhs: tuple[PatternNode | NccPatternGroup | ForallNode | OrGroup, ...] = ()
     rhs_src: str = ""
     tags: tuple[Tag, ...] = ()
 

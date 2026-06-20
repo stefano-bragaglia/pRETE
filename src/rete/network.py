@@ -174,8 +174,12 @@ class ReteNetwork:
         left: BetaMemory | DummyTopNode,
         earlier: list[Pattern],
         group: NccGroup,
-    ) -> JoinNode:
-        """Build the positive join-node chain for the NCC *group*'s subnetwork.
+    ) -> JoinNode | NegativeJoinNode:
+        """Build the join-node chain for the NCC *group*'s subnetwork.
+
+        Uses :meth:`_process_condition` so that negated patterns inside an
+        NCC (needed by ``forall`` compilation) produce :class:`NegativeJoinNode`
+        instead of :class:`JoinNode`.
 
         :param left: the same left input as the NCC node (parallel branch)
         :param earlier: patterns from the main chain (variables accessible in group)
@@ -184,11 +188,9 @@ class ReteNetwork:
         """
         sub_left: BetaMemory | DummyTopNode = left
         sub_earlier = list(earlier)
-        sub_last: JoinNode | None = None
+        sub_last: JoinNode | NegativeJoinNode | None = None
         for i, pattern in enumerate(group.conditions):
-            am = self.root.build_or_share_alpha_memory(pattern)
-            tests = JoinTest.extract(pattern, sub_earlier)
-            sub_last = self._build_or_share_join_node(sub_left, am, tests, pattern)
+            sub_last = self._process_condition(pattern, sub_left, sub_earlier)
             sub_earlier.append(pattern)
             if i < len(group.conditions) - 1:
                 sub_left = self._build_or_share_beta_memory(sub_last)
@@ -425,8 +427,12 @@ class ReteNetwork:
         if isinstance(ncc.left_input, BetaMemory):
             ncc.left_input.successors.remove(ncc)
             self._gc_beta_memory(ncc.left_input)
-        ncc.partner.sub_last_join.children.remove(ncc.partner)
-        self._gc_join_node(ncc.partner.sub_last_join)
+        sub_last = ncc.partner.sub_last_join
+        sub_last.children.remove(ncc.partner)
+        if isinstance(sub_last, NegativeJoinNode):
+            self._gc_negative_join_node(sub_last)
+        else:
+            self._gc_join_node(sub_last)
 
     def _gc_beta_memory(self, bm: BetaMemory) -> None:
         """Remove *bm* from the network if it has no remaining successors.
