@@ -10,8 +10,10 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    NamedConstraint,
     NccPatternGroup,
     PatternNode,
+    PositionalConstraint,
     ProgramNode,
     RuleDecl,
     Tag,
@@ -27,6 +29,26 @@ _BOOL_LITERALS: dict[str, bool | None] = {
     "true": True, "false": False,
     "None": None, "null": None,
 }
+
+_VALUE_KW: frozenset[str] = frozenset(_BOOL_LITERALS)
+
+_VALUE_KINDS: frozenset[str] = frozenset({"INT", "FLOAT", "STRING"})
+
+
+def _is_value_token(t: Tok | None) -> bool:
+    """Return True if *t* starts a value literal (not a field path)."""
+    if t is None:
+        return False
+    if t.kind in _VALUE_KINDS:
+        return True
+    return _is_minus_or_bool_kw(t)
+
+
+def _is_minus_or_bool_kw(t: Tok) -> bool:
+    """Return True if *t* is a unary minus or a boolean/null keyword."""
+    if t.kind == "PUNCT" and t.value == "-":
+        return True
+    return t.kind == "KW" and t.value in _VALUE_KW
 
 
 class Parser:
@@ -255,10 +277,24 @@ class Parser:
                 self._advance()
         return tuple(clist)
 
-    def _parse_constraint(self) -> BindConstraint | CompareConstraint:
+    def _parse_constraint(self):
+        if self._is_positional_start():
+            return self._parse_positional()
+        if self._is_named_start():
+            return self._parse_named()
         if self._peek_kind("VAR"):
             return self._parse_bind()
         return self._parse_compare()
+
+    def _is_positional_start(self) -> bool:
+        """Return True if the next token starts a positional constraint."""
+        if self._peek_kind("VAR"):
+            return not self._peek2_punct(":")
+        return _is_value_token(self._peek())
+
+    def _is_named_start(self) -> bool:
+        """Return True if the next tokens form ``IDENT =`` (named constraint)."""
+        return self._peek_kind("IDENT") and self._peek2_eq()
 
     def _parse_bind(self) -> BindConstraint:
         var = self._expect("VAR").value
@@ -271,6 +307,22 @@ class Parser:
         op = self._expect("OP").value
         rhs = self._parse_value()
         return CompareConstraint(field, op, rhs)
+
+    def _parse_positional(self) -> PositionalConstraint:
+        return PositionalConstraint(self._parse_value())
+
+    def _parse_named(self) -> NamedConstraint:
+        field = self._expect("IDENT").value
+        self._expect("OP", "=")
+        return NamedConstraint(field, self._parse_value())
+
+    def _peek2_eq(self) -> bool:
+        t = self._toks[self._pos + 1] if self._pos + 1 < len(self._toks) else None
+        return t is not None and t.kind == "OP" and t.value == "="
+
+    def _peek2_punct(self, v: str) -> bool:
+        t = self._toks[self._pos + 1] if self._pos + 1 < len(self._toks) else None
+        return t is not None and t.kind == "PUNCT" and t.value == v
 
     def _parse_field_path(self) -> str:
         parts = [self._expect("IDENT").value]

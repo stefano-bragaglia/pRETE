@@ -16,6 +16,8 @@ __all__ = [
     "DeclareDecl",
     "BindConstraint",
     "CompareConstraint",
+    "PositionalConstraint",
+    "NamedConstraint",
     "PatternNode",
     "NccPatternGroup",
     "RuleDecl",
@@ -96,20 +98,49 @@ class CompareConstraint:
 
 
 @dataclass(frozen=True)
+class PositionalConstraint:
+    """A bare value constraint — ``TypeName(v1, v2)`` positional form.
+
+    The compiler maps this to the *n*-th declared field (0-based count of
+    ``PositionalConstraint`` instances in the pattern, left-to-right).
+
+    :param value: parsed value (same range as :attr:`CompareConstraint.rhs`).
+    """
+
+    value: str | int | float | bool | None
+
+
+@dataclass(frozen=True)
+class NamedConstraint:
+    """A keyword-style constraint — ``field=value`` inside a pattern.
+
+    Semantically equivalent to ``CompareConstraint(field, "==", value)``.
+
+    :param field: top-level field name (no dots).
+    :param value: parsed value (same range as :attr:`CompareConstraint.rhs`).
+    """
+
+    field: str
+    value: str | int | float | bool | None
+
+
+@dataclass(frozen=True)
 class PatternNode:
     """A single positive or negated pattern in the LHS.
 
     :param type_name: fact type to match, e.g. ``"Temperature"``.
     :param fact_var: dollar-prefixed fact binding if present (``"$t"``),
         ``None`` otherwise.  Always provided explicitly by the parser.
-    :param constraints: ordered tuple of :class:`BindConstraint` or
-        :class:`CompareConstraint`; may be empty.
+    :param constraints: ordered tuple of constraint nodes; may be empty.
     :param negated: ``True`` for ``not pattern`` (single-pattern negation).
     """
 
     type_name: str
     fact_var: str | None
-    constraints: tuple[BindConstraint | CompareConstraint, ...]
+    constraints: tuple[
+        BindConstraint | CompareConstraint
+        | PositionalConstraint | NamedConstraint, ...
+    ]
     negated: bool
 
 

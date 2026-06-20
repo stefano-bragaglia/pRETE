@@ -587,47 +587,37 @@ class TestShorthandPatterns:
         _, _ = _setup(src)
 
     def test_positional_fact_fires_rule(self) -> None:
+        results: list[str] = []
         src = (
             self._POINT_SRC
             + 'rule "origin"\nwhen\n  Point(0, 0)\nthen\n  results.append("hit")\nend'
         )
-        engine, types = _setup(src)
-        results: list[str] = []
-        engine.network.conflict_set  # ensure network ready
-        for prod in engine.productions:
-            orig = prod.rhs
-            def _rhs(token, _orig=orig, _r=results):
-                _r.append("hit")
-            prod.rhs = _rhs
+        engine, types = _setup(src, ctx={"results": results})
         engine.add_fact(Fact(types["Point"](x=0, y=0)))
         engine.run()
         assert results == ["hit"]
 
     def test_positional_non_matching_fact_does_not_fire(self) -> None:
-        fired: list[bool] = []
+        results: list[str] = []
         src = (
             self._POINT_SRC
-            + 'rule "origin"\nwhen\n  Point(0, 0)\nthen\n  pass\nend'
+            + 'rule "origin"\nwhen\n  Point(0, 0)\nthen\n  results.append("hit")\nend'
         )
-        engine, types = _setup(src)
-        for prod in engine.productions:
-            prod.rhs = lambda token: fired.append(True)
+        engine, types = _setup(src, ctx={"results": results})
         engine.add_fact(Fact(types["Point"](x=1, y=0)))
         engine.run()
-        assert fired == []
+        assert results == []
 
     def test_named_fact_fires_rule(self) -> None:
+        results: list[str] = []
         src = (
             self._POINT_SRC
-            + 'rule "y-axis"\nwhen\n  Point(y=0)\nthen\n  pass\nend'
+            + 'rule "y-axis"\nwhen\n  Point(y=0)\nthen\n  results.append("hit")\nend'
         )
-        engine, types = _setup(src)
-        fired: list[bool] = []
-        for prod in engine.productions:
-            prod.rhs = lambda token: fired.append(True)
+        engine, types = _setup(src, ctx={"results": results})
         engine.add_fact(Fact(types["Point"](x=99, y=0)))
         engine.run()
-        assert fired == [True]
+        assert results == ["hit"]
 
 
 # ===========================================================================
