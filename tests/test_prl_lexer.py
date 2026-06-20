@@ -47,8 +47,10 @@ class TestKeywords:
     """Every reserved word produces a single KW token."""
 
     def test_each_keyword_is_kw(self) -> None:
+        # 'then' is omitted: a bare 'then' is an unterminated block (SyntaxError).
+        # It is tested in context in TestRawBlock.
         for word in (
-            "package", "declare", "rule", "end", "when", "then",
+            "package", "declare", "rule", "end", "when",
             "not", "salience", "true", "false", "null", "None",
         ):
             assert _kv(word) == [("KW", word)], f"failed for keyword {word!r}"
