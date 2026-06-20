@@ -111,8 +111,13 @@ class Production:
     The RHS receives the matched :class:`~rete.fact.Token`; variable bindings
     are available via ``token.bindings``.
 
+    :param no_loop: when ``True``, prevents self-reactivation — any new
+        conflict-set entries for this production that are created during its
+        own RHS execution are removed before the next cycle.
+
     :see: Doorenbos §2.1
     """
 
     lhs: list[Pattern | NccGroup]
     rhs: Callable[[Token], None]
+    no_loop: bool = False

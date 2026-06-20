@@ -397,12 +397,11 @@ class TestAtToken:
         assert toks[1] == Tok("KW", "no-loop", 1)
 
     def test_at_with_value_parens(self) -> None:
-        toks = tokenize("@role(event)")
-        assert toks[0] == Tok("AT", "@", 1)
-        assert toks[1] == Tok("IDENT", "role", 1)
-        assert toks[2] == Tok("PUNCT", "(", 1)
-        assert toks[3] == Tok("IDENT", "event", 1)
-        assert toks[4] == Tok("PUNCT", ")", 1)
+        kv = _kv("@role(event)")
+        assert kv == [
+            ("AT", "@"), ("IDENT", "role"), ("PUNCT", "("),
+            ("IDENT", "event"), ("PUNCT", ")"),
+        ]
 
     def test_multiple_tags_produce_multiple_at_tokens(self) -> None:
         toks = tokenize("@role(event)\n@key")

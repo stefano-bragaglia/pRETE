@@ -461,8 +461,8 @@ class TestParseTags:
         assert rd.no_loop is False  # attribute form only; compiler combines both
 
     def test_unknown_tag_stored_on_rule(self) -> None:
-        rd = _first_rule('@future-tag\nrule "r" when\nthen\npass\nend')
-        assert any(t.name == "future-tag" for t in rd.tags)
+        rd = _first_rule('@future_feature\nrule "r" when\nthen\npass\nend')
+        assert any(t.name == "future_feature" for t in rd.tags)
 
     def test_no_loop_kw_tag_name_parsed(self) -> None:
         """``@no-loop`` tag name is lexed as KW; parser must accept it."""
