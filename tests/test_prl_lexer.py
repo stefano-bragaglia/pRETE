@@ -453,3 +453,31 @@ class TestImportKeywords:
         toks = tokenize("then\n  import os\nend")
         kw_toks = [t for t in toks if t.kind == "KW" and t.value == "import"]
         assert kw_toks == []
+
+
+# ===========================================================================
+# or / forall keywords (ES-6)
+# ===========================================================================
+
+class TestOrForallKeywords:
+    """``or`` and ``forall`` are reserved keywords."""
+
+    def test_or_is_kw(self) -> None:
+        assert _kv("or") == [("KW", "or")]
+
+    def test_forall_is_kw(self) -> None:
+        assert _kv("forall") == [("KW", "forall")]
+
+    def test_or_in_rawblock_not_tokenised(self) -> None:
+        """``or`` inside a then-block is raw-captured, not a KW token."""
+        toks = tokenize("then\n  x = a or b\nend")
+        assert not any(t.kind == "KW" and t.value == "or" for t in toks)
+
+    def test_forall_in_rawblock_not_tokenised(self) -> None:
+        """``forall`` inside a then-block is raw-captured, not a KW token."""
+        toks = tokenize("then\n  forall(x)\nend")
+        assert not any(t.kind == "KW" and t.value == "forall" for t in toks)
+
+    def test_or_ident_not_mangled(self) -> None:
+        """``orange`` is still IDENT, not confused with ``or``."""
+        assert _kv("orange") == [("IDENT", "orange")]

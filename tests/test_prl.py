@@ -713,3 +713,111 @@ class TestPublicApi:
     def test_load_prl_importable_from_rete(self) -> None:
         from rete import load_prl as _lp
         assert callable(_lp)
+
+
+# ===========================================================================
+# or disjunction integration (ES-6)
+# ===========================================================================
+
+class TestOrIntegration:
+    """End-to-end: either or-branch triggers the RHS."""
+
+    _SRC = (
+        "declare Vehicle\n  kind: str\nend\n"
+        'rule "flag"\n'
+        "when\n"
+        '  $v: Vehicle(kind == "car") or\n'
+        '  $v: Vehicle(kind == "truck")\n'
+        "then\n"
+        "  results.append(v.obj.kind)\n"
+        "end\n"
+    )
+
+    def test_first_branch_fires(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Vehicle"](kind="car")))
+        engine.run()
+        assert "car" in results
+
+    def test_second_branch_fires(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Vehicle"](kind="truck")))
+        engine.run()
+        assert "truck" in results
+
+    def test_non_matching_does_not_fire(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Vehicle"](kind="bike")))
+        engine.run()
+        assert results == []
+
+    def test_two_productions_registered(self) -> None:
+        _, prods = load_prl(self._SRC)
+        assert len(prods) == 2
+
+    def test_both_branches_fire_independently(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Vehicle"](kind="car")))
+        engine.add_fact(Fact(types["Vehicle"](kind="truck")))
+        engine.run()
+        assert set(results) == {"car", "truck"}
+
+
+# ===========================================================================
+# forall integration (ES-6)
+# ===========================================================================
+
+class TestForallIntegration:
+    """End-to-end: forall fires when universal condition holds."""
+
+    _SRC = (
+        "declare Order\n  status: str\nend\n"
+        "declare Approval\n  ref: str\nend\n"
+        'rule "all approved"\n'
+        "when\n"
+        "  forall(Order(), Approval())\n"
+        "then\n"
+        '  results.append("ok")\n'
+        "end\n"
+    )
+
+    def test_fires_when_no_order(self) -> None:
+        """No orders → vacuously true → rule fires."""
+        results: list[str] = []
+        engine, _ = _setup(self._SRC, ctx={"results": results})
+        engine.run()
+        assert results == ["ok"]
+
+    def test_does_not_fire_when_order_without_approval(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Order"](status="pending")))
+        engine.run()
+        assert results == []
+
+    def test_fires_when_order_has_approval(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Order"](status="pending")))
+        engine.add_fact(Fact(types["Approval"](ref="x")))
+        engine.run()
+        assert results == ["ok"]
+
+    def test_retracting_approval_unblocks(self) -> None:
+        """Removing the Approval re-blocks the rule (retraction propagates)."""
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        order = Fact(types["Order"](status="pending"))
+        approval = Fact(types["Approval"](ref="x"))
+        engine.add_fact(order)
+        engine.add_fact(approval)
+        engine.run()
+        assert "ok" in results
+        results.clear()
+        engine.remove_fact(approval)
+        engine.run()
+        assert results == []

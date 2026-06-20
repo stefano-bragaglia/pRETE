@@ -12,9 +12,11 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    ForallNode,
     ImportDecl,
     NamedConstraint,
     NccPatternGroup,
+    OrGroup,
     PatternNode,
     PositionalConstraint,
     ProgramNode,
@@ -441,3 +443,75 @@ class TestProgramNode:
         assert ProgramNode((), ()) == ProgramNode((), ())
         rd = RuleDecl("r")
         assert ProgramNode((), (rd,)) != ProgramNode((), ())
+
+
+# ===========================================================================
+# OrGroup (ES-6)
+# ===========================================================================
+
+class TestOrGroup:
+    """``OrGroup`` is a frozen dataclass of branch tuples."""
+
+    def test_construction(self) -> None:
+        b0 = (PatternNode("A", None, (), False),)
+        b1 = (PatternNode("B", None, (), False),)
+        og = OrGroup((b0, b1))
+        assert len(og.branches) == 2
+
+    def test_branch_content(self) -> None:
+        b = (PatternNode("A", None, (), False),)
+        og = OrGroup((b, b))
+        assert og.branches[0][0].type_name == "A"
+
+    def test_frozen(self) -> None:
+        og = OrGroup(())
+        with pytest.raises(AttributeError):
+            og.branches = ()  # type: ignore[misc]
+
+    def test_equality(self) -> None:
+        b = (PatternNode("A", None, (), False),)
+        assert OrGroup((b, b)) == OrGroup((b, b))
+        assert OrGroup((b, b)) != OrGroup((b,))
+
+    def test_hashable(self) -> None:
+        b = (PatternNode("A", None, (), False),)
+        assert hash(OrGroup((b, b))) == hash(OrGroup((b, b)))
+
+
+# ===========================================================================
+# ForallNode (ES-6)
+# ===========================================================================
+
+class TestForallNode:
+    """``ForallNode`` is a frozen dataclass with two PatternNode fields."""
+
+    def test_construction(self) -> None:
+        p = PatternNode("Order", None, (), False)
+        q = PatternNode("Approval", None, (), False)
+        fn = ForallNode(p, q)
+        assert fn.pattern is p
+        assert fn.condition is q
+
+    def test_pattern_and_condition_stored(self) -> None:
+        p = PatternNode("P", None, (), False)
+        q = PatternNode("Q", None, (), False)
+        fn = ForallNode(p, q)
+        assert fn.pattern.type_name == "P"
+        assert fn.condition.type_name == "Q"
+
+    def test_frozen(self) -> None:
+        p = PatternNode("A", None, (), False)
+        fn = ForallNode(p, p)
+        with pytest.raises(AttributeError):
+            fn.pattern = p  # type: ignore[misc]
+
+    def test_equality(self) -> None:
+        p = PatternNode("A", None, (), False)
+        q = PatternNode("B", None, (), False)
+        assert ForallNode(p, q) == ForallNode(p, q)
+        assert ForallNode(p, q) != ForallNode(q, p)
+
+    def test_hashable(self) -> None:
+        p = PatternNode("A", None, (), False)
+        q = PatternNode("B", None, (), False)
+        assert hash(ForallNode(p, q)) == hash(ForallNode(p, q))

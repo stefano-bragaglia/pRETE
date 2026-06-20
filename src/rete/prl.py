@@ -33,9 +33,11 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    ForallNode,
     ImportDecl,
     NamedConstraint,
     NccPatternGroup,
+    OrGroup,
     PatternNode,
     PositionalConstraint,
 )
@@ -103,10 +105,7 @@ def load_prl(
         _resolve_import(imp, resolved)
     for decl in _topo_sort_declares(program.declares):
         resolved[decl.name] = _compile_declare(decl, resolved)
-    productions = [
-        _compile_rule(r, resolved, engine) for r in program.rules
-    ]
-    return resolved, productions
+    return resolved, _flatten_rules(program.rules, resolved, engine)
 
 
 # ---------------------------------------------------------------------------
@@ -287,12 +286,27 @@ def _resolve_type(name: str, types: dict[str, type]) -> type:
 # ---------------------------------------------------------------------------
 
 
+def _flatten_rules(
+    rules: tuple,
+    types: dict[str, type],
+    engine: Any,
+) -> list[Production]:
+    """Compile all rules, flattening or-rules into multiple Productions."""
+    result: list[Production] = []
+    for r in rules:
+        result.extend(_compile_rule(r, types, engine))
+    return result
+
+
 def _compile_rule(
     rule: Any,
     types: dict[str, type],
     engine: Any,
-) -> Production:
-    """Compile one ``RuleDecl`` into a ``Production``.
+) -> list[Production]:
+    """Compile one ``RuleDecl`` into one or more ``Production`` objects.
+
+    A rule with no ``or`` returns a single-element list.  A rule whose LHS
+    is an :class:`~rete.prl_ast.OrGroup` returns one ``Production`` per branch.
 
     :param rule: the ``RuleDecl`` AST node.
     :param types: resolved type mapping.
@@ -304,18 +318,100 @@ def _compile_rule(
     """
     # ponytail: rule.salience parsed but Production has no salience field yet
     no_loop = rule.no_loop or any(t.name == "no-loop" for t in rule.tags)
-    conditions, fact_bindings = _compile_lhs(rule.lhs, types)
+    lhs = rule.lhs
+    if len(lhs) == 1 and isinstance(lhs[0], OrGroup):
+        return _compile_or_rule(rule, lhs[0], types, engine, no_loop)
+    conditions, fact_bindings = _compile_lhs(lhs, types)
     rhs = _compile_rhs(rule.rhs_src, fact_bindings, types, engine)
-    return Production(lhs=conditions, rhs=rhs, no_loop=no_loop)
+    return [Production(lhs=conditions, rhs=rhs, no_loop=no_loop)]
+
+
+def _compile_or_rule(
+    rule: Any,
+    or_group: OrGroup,
+    types: dict[str, type],
+    engine: Any,
+    no_loop: bool,
+) -> list[Production]:
+    """Expand one or-rule into one Production per branch.
+
+    Each branch compiles independently with its own LHS and fact-binding
+    index, but all share the same raw RHS source.
+
+    :param rule: the original ``RuleDecl`` (for ``rhs_src``).
+    :param or_group: the parsed disjunction.
+    :param types: resolved type mapping.
+    :param engine: optional engine for RHS helper injection.
+    :param no_loop: combined ``no-loop`` flag from attribute + tag.
+
+    .. note::
+        Branch naming (``"rule_name [or 0]"``) is a documentation convention
+        only — ``Production`` has no ``name`` field in this version.
+
+    # ponytail: Production.name not added here; deferred until an engine
+    # feature (e.g. query/debug) actually needs it.
+    """
+    _check_or_var_scopes(or_group.branches)
+    prods = []
+    for branch in or_group.branches:
+        conditions, fact_bindings = _compile_lhs(branch, types)
+        rhs = _compile_rhs(rule.rhs_src, fact_bindings, types, engine)
+        prods.append(Production(lhs=conditions, rhs=rhs, no_loop=no_loop))
+    return prods
+
+
+def _node_vars(node: PatternNode) -> set[str]:
+    """Return all ``$var`` names bound by one ``PatternNode``.
+
+    Collects both the ``fact_var`` prefix (``$x: Type()``) and any
+    :class:`~rete.prl_ast.BindConstraint` vars (``$v: field``).
+
+    :param node: a ``PatternNode`` from the parser.
+    """
+    bound = {node.fact_var} if node.fact_var else set()
+    bound.update(c.var for c in node.constraints if isinstance(c, BindConstraint))
+    return bound
+
+
+def _branch_vars(branch: tuple) -> frozenset[str]:
+    """Return all ``$var`` names bound across one or-branch.
+
+    :param branch: a tuple of ``PatternNode | NccPatternGroup`` nodes.
+    """
+    bound: set[str] = set()
+    for node in branch:
+        if isinstance(node, PatternNode):
+            bound |= _node_vars(node)
+    return frozenset(bound)
+
+
+def _check_or_var_scopes(branches: tuple) -> None:
+    """Raise ``SyntaxError`` if or-branches bind different variable sets.
+
+    All branches must bind exactly the same set of ``$var`` names so that
+    the shared RHS closure does not raise ``NameError`` at runtime.
+
+    :param branches: all branches of an ``OrGroup``.
+    :raises SyntaxError: on variable-set mismatch between any two branches.
+    """
+    sets = [_branch_vars(b) for b in branches]
+    ref = sets[0]
+    for i, s in enumerate(sets[1:], 1):
+        if s != ref:
+            raise SyntaxError(
+                f"'or' branch {i} binds {sorted(s)!r} "
+                f"but branch 0 binds {sorted(ref)!r}; "
+                "all branches must bind the same variable names"
+            )
 
 
 def _compile_lhs(
-    lhs_nodes: tuple[PatternNode | NccPatternGroup, ...],
+    lhs_nodes: tuple,
     types: dict[str, type],
 ) -> tuple[list[Pattern | NccGroup], dict[str, int]]:
     """Compile the LHS tuple into a conditions list and a fact-binding index.
 
-    :param lhs_nodes: ordered tuple of ``PatternNode | NccPatternGroup``.
+    :param lhs_nodes: ordered tuple of ``PatternNode | NccPatternGroup | ForallNode``.
     :param types: resolved type mapping.
     :returns: ``(conditions, fact_bindings)`` where *fact_bindings* maps each
         fact-variable string (e.g. ``"$t"``) to its index in *conditions*.
@@ -325,9 +421,44 @@ def _compile_lhs(
     for idx, node in enumerate(lhs_nodes):
         if isinstance(node, NccPatternGroup):
             conditions.append(_compile_ncc(node, types))
+        elif isinstance(node, ForallNode):
+            conditions.append(_compile_forall(node, idx, types, fact_bindings))
         else:
             conditions.append(_compile_pattern(node, idx, types, fact_bindings))
     return conditions, fact_bindings
+
+
+def _compile_forall(
+    node: ForallNode,
+    idx: int,
+    types: dict[str, type],
+    fact_bindings: dict[str, int],
+) -> NccGroup:
+    """Compile ``forall(P, Q)`` to ``NccGroup([P, Q_negated])``.
+
+    The semantics of ``forall(P, Q)`` are "for every P there is a Q", which
+    is logically equivalent to ``NOT(P AND NOT Q)``.  We compile this as an
+    NCC subnetwork ``[P_pattern, Q_negated_pattern]`` — the rule fires when
+    no token matches P without a matching Q.
+
+    :param node: the ``ForallNode`` AST node.
+    :param idx: position of this node in the outer LHS (for join-spec offsets).
+    :param types: resolved type mapping.
+    :param fact_bindings: mutable dict updated with ``P``'s fact_var if set.
+    """
+    p_pattern = _compile_pattern(node.pattern, idx, types, fact_bindings)
+    q_negated = _compile_pattern(
+        PatternNode(
+            node.condition.type_name,
+            node.condition.fact_var,
+            node.condition.constraints,
+            negated=True,
+        ),
+        idx + 1,
+        types,
+        fact_bindings,
+    )
+    return NccGroup((p_pattern, q_negated))
 
 
 def _compile_pattern(
