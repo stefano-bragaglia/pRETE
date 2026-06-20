@@ -136,6 +136,7 @@ class PatternNode:
         ``None`` otherwise.  Always provided explicitly by the parser.
     :param constraints: ordered tuple of constraint nodes; may be empty.
     :param negated: ``True`` for ``not pattern`` (single-pattern negation).
+    :param exists: ``True`` for ``exists pattern`` (existential check).
     """
 
     type_name: str
@@ -145,6 +146,7 @@ class PatternNode:
         | PositionalConstraint | NamedConstraint, ...
     ]
     negated: bool
+    exists: bool = False
 
 
 @dataclass(frozen=True)

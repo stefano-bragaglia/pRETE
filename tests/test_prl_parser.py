@@ -739,7 +739,7 @@ class TestParseExists:
         src = (
             'rule "r"\nwhen\n'
             '  $acc: Account()\n'
-            '  exists Invoice(accountId == $acc.id)\n'
+            '  exists Invoice(accountId == $acc)\n'
             'then\nend'
         )
         exists_pat = _parse(src).rules[0].lhs[1]

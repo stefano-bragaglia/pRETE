@@ -80,7 +80,7 @@ class BetaMemory:
 
     items: list[Token] = field(default_factory=list)
     successors: list[LeftNode] = field(default_factory=list, repr=False)
-    parent_join: JoinNode | NegativeJoinNode | NccNode | None = field(
+    parent_join: JoinNode | NegativeJoinNode | ExistsNode | NccNode | None = field(
         default=None, repr=False
     )
 
@@ -395,6 +395,137 @@ class NegativeJoinNode(BaseJoinNode):
 
 
 @dataclass
+class ExistsToken:
+    """Pairs a left-input token with its count of matching right Facts.
+
+    :see: Doorenbos §2.7 (symmetric to :class:`NegativeToken`)
+    """
+
+    token: Token
+    count: int = 0
+
+
+@dataclass
+class ExistsNode(BaseJoinNode):
+    """Existential join node: emits a token downstream only while count > 0.
+
+    Mirror image of :class:`NegativeJoinNode`: emits on the 0→1 right-match
+    transition and retracts on the 1→0 transition.  The emitted token is the
+    left token unchanged — no binding is extracted from the right fact.
+
+    :see: Doorenbos §2.7
+    """
+
+    left_input: BetaMemory | DummyTopNode = field(default_factory=DummyTopNode)
+    items: list[ExistsToken] = field(default_factory=list)
+
+    def left_activate(self, token: Token) -> None:
+        """Handle a new token from the left input.
+
+        Re-links from alpha memory if previously right-unlinked.
+
+        :param token: the partial match entering from the left
+        """
+        if self.right_unlinked:
+            self.alpha_memory.successors.append(self)
+            self.right_unlinked = False
+        count = self._count_matches(token)
+        exists_tok = ExistsToken(token=token, count=count)
+        self.items.append(exists_tok)
+        if count > 0:
+            for child in self.children:
+                child.left_activate(token)
+
+    def right_activate(self, fact: Fact) -> None:
+        """Handle a new Fact arriving in the alpha memory (right input).
+
+        :param fact: the Fact that just entered the alpha memory
+        """
+        for exists_tok in self.items:
+            if self._passes_tests(exists_tok.token, fact):
+                self._increment(exists_tok)
+
+    def right_retract(self, fact: Fact) -> None:
+        """Handle removal of a Fact from the alpha memory.
+
+        :param fact: the Fact being retracted
+        """
+        for exists_tok in self.items:
+            if self._passes_tests(exists_tok.token, fact):
+                self._decrement(exists_tok)
+
+    def left_retract(self, token: Token) -> None:
+        """Handle removal of a token from the left input.
+
+        Right-unlinks from alpha memory when the items list drains to zero.
+
+        :param token: the partial match being retracted
+        """
+        exists_tok = self._find_exists_tok(token)
+        if exists_tok.count > 0:
+            for child in self.children:
+                child.left_retract(token)
+        self.items.remove(exists_tok)
+        if not self.items and not self.right_unlinked:
+            self.alpha_memory.successors.remove(self)
+            self.right_unlinked = True
+
+    def update_child(self, child: object) -> None:
+        """Seed *child* with all currently emitted tokens (count > 0).
+
+        :param child: a newly attached downstream node
+        :see: Doorenbos §2.6 ``update-new-node-with-matches-from-above``
+        """
+        for exists_tok in self.items:
+            if exists_tok.count > 0:
+                child.left_activate(exists_tok.token)
+
+    def _find_exists_tok(self, token: Token) -> ExistsToken:
+        """Return the ExistsToken whose ``.token`` is *token*.
+
+        :param token: the left-input token to look up
+        """
+        return next(et for et in self.items if et.token is token)
+
+    def _increment(self, exists_tok: ExistsToken) -> None:
+        """Emit downstream token on 0→1 count transition.
+
+        :param exists_tok: the ExistsToken to update
+        """
+        if exists_tok.count == 0:
+            for child in self.children:
+                child.left_activate(exists_tok.token)
+        exists_tok.count += 1
+
+    def _decrement(self, exists_tok: ExistsToken) -> None:
+        """Retract downstream token on 1→0 count transition.
+
+        :param exists_tok: the ExistsToken to update
+        """
+        exists_tok.count -= 1
+        if exists_tok.count == 0:
+            for child in self.children:
+                child.left_retract(exists_tok.token)
+
+    def _count_matches(self, token: Token) -> int:
+        """Count right Facts that pass all join tests for *token*.
+
+        :param token: the left-input token to test against
+        """
+        return sum(
+            1 for fact in self.alpha_memory.items if self._passes_tests(token, fact)
+        )
+
+    def _initialize_from(self, tokens: Iterable[Token]) -> None:
+        """Seed this node by left-activating each token in *tokens*.
+
+        :param tokens: an iterable of :class:`Token` objects
+        """
+        for t in tokens:
+            self.left_activate(t)
+
+
+@dataclass
 class NccToken:
     """Left token paired with its count of subnetwork matches and their result tokens.
 
@@ -601,7 +732,7 @@ class PNode:
     production: Production
     conflict_set: list[Instantiation]
     items: list[Token] = field(default_factory=list)
-    parent_join: JoinNode | NegativeJoinNode | NccNode | None = field(
+    parent_join: JoinNode | NegativeJoinNode | ExistsNode | NccNode | None = field(
         default=None, repr=False
     )
 

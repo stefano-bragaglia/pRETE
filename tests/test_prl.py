@@ -807,6 +807,21 @@ class TestForallIntegration:
         engine.run()
         assert results == ["ok"]
 
+    def test_retracting_approval_unblocks(self) -> None:
+        """Removing the Approval re-blocks the rule (retraction propagates)."""
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        order = Fact(types["Order"](status="pending"))
+        approval = Fact(types["Approval"](ref="x"))
+        engine.add_fact(order)
+        engine.add_fact(approval)
+        engine.run()
+        assert "ok" in results
+        results.clear()
+        engine.remove_fact(approval)
+        engine.run()
+        assert results == []
+
 
 # ===========================================================================
 # exists integration (ES-7)
@@ -854,20 +869,5 @@ class TestExistsIntegration:
         invoice = Fact(types["Invoice"](overdue=True))
         engine.add_fact(invoice)
         engine.remove_fact(invoice)
-        engine.run()
-        assert results == []
-
-    def test_retracting_approval_unblocks(self) -> None:
-        """Removing the Approval re-blocks the rule (retraction propagates)."""
-        results: list[str] = []
-        engine, types = _setup(self._SRC, ctx={"results": results})
-        order = Fact(types["Order"](status="pending"))
-        approval = Fact(types["Approval"](ref="x"))
-        engine.add_fact(order)
-        engine.add_fact(approval)
-        engine.run()
-        assert "ok" in results
-        results.clear()
-        engine.remove_fact(approval)
         engine.run()
         assert results == []
