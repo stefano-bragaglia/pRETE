@@ -160,6 +160,23 @@ class TestOperators:
 
 
 # ===========================================================================
+# Assignment operator (ES-4)
+# ===========================================================================
+
+class TestAssignToken:
+    """Single ``=`` is ``OP("=")``, distinct from ``OP("==")``.``"""
+
+    def test_single_eq_is_op(self) -> None:
+        assert _kv("=") == [("OP", "=")]
+
+    def test_double_eq_not_split(self) -> None:
+        assert _kv("==") == [("OP", "==")]
+
+    def test_named_form_tokens(self) -> None:
+        assert _kv("x=1") == [("IDENT", "x"), ("OP", "="), ("INT", "1")]
+
+
+# ===========================================================================
 # Punctuation
 # ===========================================================================
 

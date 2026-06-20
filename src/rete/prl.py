@@ -32,8 +32,10 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    NamedConstraint,
     NccPatternGroup,
     PatternNode,
+    PositionalConstraint,
 )
 from rete.prl_lexer import tokenize
 from rete.prl_parser import parse
@@ -297,8 +299,84 @@ def _compile_pattern(
     type_ = _resolve_type(node.type_name, types)
     if node.fact_var:
         fact_bindings[node.fact_var] = idx
-    alpha_tests, join_tests, bindings = _compile_constraints(node.constraints)
+    constraints = _resolve_shorthand(node.constraints, type_)
+    alpha_tests, join_tests, bindings = _compile_constraints(constraints)
     return Pattern(type_, alpha_tests, join_tests, bindings, node.negated)
+
+
+def _resolve_shorthand(
+    constraints: tuple,
+    type_: type,
+) -> tuple[BindConstraint | CompareConstraint, ...]:
+    """Expand :class:`PositionalConstraint` and :class:`NamedConstraint` nodes.
+
+    Positional constraints are mapped to fields in declaration order;
+    named constraints are mapped to the named field — both become
+    :class:`CompareConstraint` (``==``).  Raises :class:`SyntaxError` on
+    out-of-bounds positionals or positional/named collision.
+
+    :param constraints: raw constraint tuple from the parser.
+    :param type_: the compiled fact type (provides field order).
+    """
+    fields = _field_names(type_)
+    out: list[BindConstraint | CompareConstraint] = []
+    pos_idx = 0
+    pos_fields: list[str] = []
+    named_fields: set[str] = set()
+    for c in constraints:
+        if isinstance(c, PositionalConstraint):
+            _check_pos_in_bounds(pos_idx, fields, type_)
+            pos_fields.append(fields[pos_idx])
+            out.append(CompareConstraint(fields[pos_idx], "==", c.value))
+            pos_idx += 1
+        elif isinstance(c, NamedConstraint):
+            named_fields.add(c.field)
+            out.append(CompareConstraint(c.field, "==", c.value))
+        else:
+            out.append(c)
+    _check_collision(pos_fields, named_fields, type_)
+    return tuple(out)
+
+
+def _field_names(type_: type) -> list[str]:
+    """Return field names in declaration order, parent fields first.
+
+    :param type_: a dataclass type (from ``make_dataclass``).
+    """
+    return list(type_.__dataclass_fields__)
+
+
+def _check_pos_in_bounds(idx: int, fields: list[str], type_: type) -> None:
+    """Raise :class:`SyntaxError` if positional index *idx* exceeds field count.
+
+    :param idx: current positional slot (0-based).
+    :param fields: ordered field name list for the type.
+    :param type_: type name for the error message.
+    """
+    if idx >= len(fields):
+        raise SyntaxError(
+            f"{type_.__name__} has {len(fields)} field(s); "
+            "too many positional constraints"
+        )
+
+
+def _check_collision(
+    pos_fields: list[str],
+    named_fields: set[str],
+    type_: type,
+) -> None:
+    """Raise :class:`SyntaxError` if a field appears in both positional and named.
+
+    :param pos_fields: field names claimed by positional constraints.
+    :param named_fields: field names claimed by named constraints.
+    :param type_: type name for the error message.
+    """
+    overlap = set(pos_fields) & named_fields
+    if overlap:
+        raise SyntaxError(
+            f"{type_.__name__}: field(s) {sorted(overlap)!r} appear "
+            "in both positional and named constraints"
+        )
 
 
 def _compile_constraints(

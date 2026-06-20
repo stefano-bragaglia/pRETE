@@ -563,6 +563,64 @@ class TestKeyField:
 
 
 # ===========================================================================
+# Shorthand constraint patterns (ES-4)
+# ===========================================================================
+
+class TestShorthandPatterns:
+    """Integration: positional and named constraints match facts correctly."""
+
+    _POINT_SRC = "declare Point\n  x: int\n  y: int\nend\n"
+
+    def test_positional_both_match(self) -> None:
+        src = self._POINT_SRC + 'rule "r"\nwhen\n  Point(0, 0)\nthen\n  pass\nend'
+        _, _ = _setup(src)  # must compile without error
+
+    def test_positional_equivalent_to_compare(self) -> None:
+        pos = self._POINT_SRC + 'rule "r"\nwhen\n  Point(0, 0)\nthen\n  pass\nend'
+        cmp = self._POINT_SRC + \
+              'rule "r"\nwhen\n  Point(x == 0, y == 0)\nthen\n  pass\nend'
+        _, _ = _setup(pos)
+        _, _ = _setup(cmp)
+
+    def test_named_constraint_compiles(self) -> None:
+        src = self._POINT_SRC + 'rule "r"\nwhen\n  Point(y=0)\nthen\n  pass\nend'
+        _, _ = _setup(src)
+
+    def test_positional_fact_fires_rule(self) -> None:
+        results: list[str] = []
+        src = (
+            self._POINT_SRC
+            + 'rule "origin"\nwhen\n  Point(0, 0)\nthen\n  results.append("hit")\nend'
+        )
+        engine, types = _setup(src, ctx={"results": results})
+        engine.add_fact(Fact(types["Point"](x=0, y=0)))
+        engine.run()
+        assert results == ["hit"]
+
+    def test_positional_non_matching_fact_does_not_fire(self) -> None:
+        results: list[str] = []
+        src = (
+            self._POINT_SRC
+            + 'rule "origin"\nwhen\n  Point(0, 0)\nthen\n  results.append("hit")\nend'
+        )
+        engine, types = _setup(src, ctx={"results": results})
+        engine.add_fact(Fact(types["Point"](x=1, y=0)))
+        engine.run()
+        assert results == []
+
+    def test_named_fact_fires_rule(self) -> None:
+        results: list[str] = []
+        src = (
+            self._POINT_SRC
+            + 'rule "y-axis"\nwhen\n  Point(y=0)\nthen\n  results.append("hit")\nend'
+        )
+        engine, types = _setup(src, ctx={"results": results})
+        engine.add_fact(Fact(types["Point"](x=99, y=0)))
+        engine.run()
+        assert results == ["hit"]
+
+
+# ===========================================================================
 # Public API
 # ===========================================================================
 

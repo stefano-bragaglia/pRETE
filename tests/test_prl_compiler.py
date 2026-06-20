@@ -18,13 +18,16 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    NamedConstraint,
     NccPatternGroup,
     PatternNode,
+    PositionalConstraint,
     Tag,
 )
 from rete.prl import (
     _compile_declare,
     _compile_lhs,
+    _compile_pattern,
     _compile_rhs,
     _java_type,
     _resolve_type,
@@ -233,6 +236,70 @@ class TestCompileDeclareKey:
         cls = _compile_declare(decl, {})
         d = {cls(id=1, name="Alice"): "first"}
         assert d[cls(id=1, name="Bob")] == "first"
+
+
+# ===========================================================================
+# Shorthand constraint compilation (ES-4)
+# ===========================================================================
+
+class TestCompileShorthand:
+    """Positional and named constraints expand to correct alpha tests."""
+
+    def _point_types(self) -> dict[str, type]:
+        decl = DeclareDecl("Point", (FieldDecl("x", "int"), FieldDecl("y", "int")))
+        return {"Point": _compile_declare(decl, {})}
+
+    def test_positional_first_field(self) -> None:
+        types = self._point_types()
+        node = PatternNode("Point", None, (PositionalConstraint(0),), False)
+        p = _compile_pattern(node, 0, types, {})
+        assert p.alpha_tests[0](types["Point"](x=0, y=9))
+        assert not p.alpha_tests[0](types["Point"](x=1, y=0))
+
+    def test_positional_second_field(self) -> None:
+        types = self._point_types()
+        node = PatternNode("Point", None, (
+            PositionalConstraint(99), PositionalConstraint(0),
+        ), False)
+        p = _compile_pattern(node, 0, types, {})
+        assert p.alpha_tests[1](types["Point"](x=0, y=0))
+        assert not p.alpha_tests[1](types["Point"](x=0, y=1))
+
+    def test_named_resolves_to_correct_field(self) -> None:
+        types = self._point_types()
+        node = PatternNode("Point", None, (NamedConstraint("y", 5),), False)
+        p = _compile_pattern(node, 0, types, {})
+        assert p.alpha_tests[0](types["Point"](x=0, y=5))
+        assert not p.alpha_tests[0](types["Point"](x=5, y=0))
+
+    def test_too_many_positionals_raises(self) -> None:
+        types = self._point_types()
+        node = PatternNode("Point", None, (
+            PositionalConstraint(0),
+            PositionalConstraint(0),
+            PositionalConstraint(0),
+        ), False)
+        with pytest.raises(SyntaxError):
+            _compile_pattern(node, 0, types, {})
+
+    def test_collision_raises(self) -> None:
+        types = self._point_types()
+        node = PatternNode("Point", None, (
+            PositionalConstraint(0),
+            NamedConstraint("x", 0),
+        ), False)
+        with pytest.raises(SyntaxError):
+            _compile_pattern(node, 0, types, {})
+
+    def test_positional_with_extends(self) -> None:
+        base = DeclareDecl("A", (FieldDecl("a", "int"),))
+        child = DeclareDecl("B", (FieldDecl("b", "int"),), extends="A")
+        types = {"A": _compile_declare(base, {})}
+        types["B"] = _compile_declare(child, types)
+        node = PatternNode("B", None, (PositionalConstraint(7),), False)
+        p = _compile_pattern(node, 0, types, {})
+        assert p.alpha_tests[0](types["B"](a=7, b=0))
+        assert not p.alpha_tests[0](types["B"](a=0, b=7))
 
 
 # ===========================================================================
