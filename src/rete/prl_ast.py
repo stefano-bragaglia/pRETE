@@ -42,10 +42,12 @@ class DeclareDecl:
 
     :param name: class name, e.g. ``"Temperature"``.
     :param fields: ordered tuple of :class:`FieldDecl` instances; may be empty.
+    :param extends: parent type name for inheritance, or ``None``.
     """
 
     name: str
     fields: tuple[FieldDecl, ...]
+    extends: str | None = None
 
 
 @dataclass(frozen=True)

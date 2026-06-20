@@ -149,7 +149,7 @@ class TestCompileDeclareExtends:
             "declare Dog extends Animal\n  breed: str\nend\n"
             "declare Animal\n  name: str\nend"
         )
-        _, types = load_prl(src)
+        types, _ = load_prl(src)
         assert issubclass(types["Dog"], types["Animal"])
 
     def test_circular_inheritance_raises(self) -> None:

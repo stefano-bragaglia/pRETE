@@ -85,11 +85,15 @@ class Parser:
     def _parse_declare(self) -> DeclareDecl:
         self._expect("KW", "declare")
         name = self._expect("IDENT").value
+        extends: str | None = None
+        if self._peek_kw("extends"):
+            self._advance()
+            extends = self._expect("IDENT").value
         fields: list[FieldDecl] = []
         while not self._peek_kw("end"):
             fields.append(self._parse_field())
         self._expect("KW", "end")
-        return DeclareDecl(name, tuple(fields))
+        return DeclareDecl(name, tuple(fields), extends)
 
     def _parse_field(self) -> FieldDecl:
         name = self._expect("IDENT").value

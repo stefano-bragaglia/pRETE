@@ -17,7 +17,7 @@ __all__ = ["Tok", "tokenize"]
 # ---------------------------------------------------------------------------
 
 _KEYWORDS: frozenset[str] = frozenset({
-    "package", "declare", "rule", "end",
+    "package", "declare", "extends", "rule", "end",
     "when", "then", "not", "salience",
     "true", "false", "null", "None",
     "True", "False",

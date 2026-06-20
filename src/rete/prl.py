@@ -22,6 +22,7 @@ import operator
 import re
 import textwrap
 from dataclasses import make_dataclass
+from graphlib import CycleError, TopologicalSorter
 from typing import Any, Callable
 
 from rete.condition import JoinSpec, NccGroup, Pattern, Production
@@ -93,7 +94,7 @@ def load_prl(
     """
     program = parse(tokenize(text))
     resolved: dict[str, type] = dict(types or {})
-    for decl in program.declares:
+    for decl in _topo_sort_declares(program.declares):
         resolved[decl.name] = _compile_declare(decl, resolved)
     productions = [
         _compile_rule(r, resolved, engine) for r in program.rules
@@ -106,6 +107,37 @@ def load_prl(
 # ---------------------------------------------------------------------------
 
 
+def _inheritance_graph(
+    declares: tuple[DeclareDecl, ...],
+) -> dict[str, set[str]]:
+    """Build a ``{name: {parent}}`` adjacency dict for topological sorting.
+
+    :param declares: raw declaration tuple from the parser.
+    """
+    return {
+        d.name: {d.extends} if d.extends else set()
+        for d in declares
+    }
+
+
+def _topo_sort_declares(
+    declares: tuple[DeclareDecl, ...],
+) -> list[DeclareDecl]:
+    """Return *declares* sorted so parent types precede child types.
+
+    :param declares: raw declaration tuple from the parser.
+    :returns: topologically ordered list.
+    :raises TypeError: on circular inheritance.
+    """
+    by_name = {d.name: d for d in declares}
+    ts: TopologicalSorter[str] = TopologicalSorter(_inheritance_graph(declares))
+    try:
+        order = list(ts.static_order())
+    except CycleError as exc:
+        raise TypeError(f"Circular inheritance: {exc}") from exc
+    return [by_name[n] for n in order if n in by_name]
+
+
 def _compile_declare(decl: DeclareDecl, types: dict[str, type]) -> type:
     """Convert a ``DeclareDecl`` into a Python dataclass.
 
@@ -114,6 +146,9 @@ def _compile_declare(decl: DeclareDecl, types: dict[str, type]) -> type:
     :returns: a new mutable dataclass class (not frozen — supports ``update``).
     """
     fields = [(fd.name, _java_type(fd.type_name, types)) for fd in decl.fields]
+    if decl.extends:
+        parent = _resolve_type(decl.extends, types)
+        return make_dataclass(decl.name, fields, bases=(parent,))
     return make_dataclass(decl.name, fields)
 
 
