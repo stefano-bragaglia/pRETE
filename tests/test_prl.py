@@ -400,6 +400,65 @@ class TestEndToEnd:
 
 
 # ===========================================================================
+# Inheritance (ES-1)
+# ===========================================================================
+
+class TestInheritance:
+    """``extends`` in declare — parent patterns fire for child-type facts."""
+
+    def test_parent_pattern_fires_for_child_fact(self) -> None:
+        fired: list[str] = []
+        src = (
+            "declare Animal\n  name: str\nend\n"
+            "declare Dog extends Animal\n  breed: str\nend\n"
+            'rule "animal" when\n'
+            "  $a: Animal()\n"
+            "then\n"
+            "  results.append(a.obj.name)\n"
+            "end\n"
+        )
+        engine, types = _setup(src, {"results": fired})
+        engine.add_fact(Fact(types["Dog"](name="Rex", breed="Lab")))
+        engine.run()
+        assert "Rex" in fired
+
+    def test_child_pattern_does_not_fire_for_sibling(self) -> None:
+        fired: list[str] = []
+        src = (
+            "declare Animal\n  name: str\nend\n"
+            "declare Dog extends Animal\n  breed: str\nend\n"
+            "declare Cat extends Animal\n  indoor: bool\nend\n"
+            'rule "dog" when\n'
+            "  $d: Dog()\n"
+            "then\n"
+            "  results.append(d.obj.name)\n"
+            "end\n"
+        )
+        engine, types = _setup(src, {"results": fired})
+        engine.add_fact(Fact(types["Cat"](name="Whiskers", indoor=True)))
+        engine.run()
+        assert fired == []
+
+    def test_two_levels_of_inheritance(self) -> None:
+        fired: list[str] = []
+        src = (
+            "declare Animal\n  name: str\nend\n"
+            "declare Dog extends Animal\n  breed: str\nend\n"
+            "declare Labrador extends Dog\n  colour: str\nend\n"
+            'rule "any animal" when\n'
+            "  $a: Animal()\n"
+            "then\n"
+            "  results.append(a.obj.name)\n"
+            "end\n"
+        )
+        engine, types = _setup(src, {"results": fired})
+        lab = types["Labrador"](name="Buddy", breed="Lab", colour="gold")
+        engine.add_fact(Fact(lab))
+        engine.run()
+        assert "Buddy" in fired
+
+
+# ===========================================================================
 # Public API
 # ===========================================================================
 

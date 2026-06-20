@@ -116,6 +116,56 @@ class TestCompileDeclare:
 
 
 # ===========================================================================
+# Declare compilation — extends
+# ===========================================================================
+
+class TestCompileDeclareExtends:
+    """``_compile_declare`` handles ``extends`` to produce subclasses."""
+
+    def test_child_is_subclass(self) -> None:
+        parent = _compile_declare(
+            DeclareDecl("Animal", (FieldDecl("name", "str"),)), {}
+        )
+        child = _compile_declare(
+            DeclareDecl("Dog", (FieldDecl("breed", "str"),), extends="Animal"),
+            {"Animal": parent},
+        )
+        assert issubclass(child, parent)
+
+    def test_child_has_parent_and_own_fields(self) -> None:
+        parent = _compile_declare(
+            DeclareDecl("Animal", (FieldDecl("name", "str"),)), {}
+        )
+        child = _compile_declare(
+            DeclareDecl("Dog", (FieldDecl("breed", "str"),), extends="Animal"),
+            {"Animal": parent},
+        )
+        obj = child(name="Rex", breed="Lab")
+        assert obj.name == "Rex"
+        assert obj.breed == "Lab"
+
+    def test_out_of_order_compiles(self) -> None:
+        src = (
+            "declare Dog extends Animal\n  breed: str\nend\n"
+            "declare Animal\n  name: str\nend"
+        )
+        _, types = load_prl(src)
+        assert issubclass(types["Dog"], types["Animal"])
+
+    def test_circular_inheritance_raises(self) -> None:
+        src = "declare A extends B\nend\ndeclare B extends A\nend"
+        with pytest.raises(TypeError):
+            load_prl(src)
+
+    def test_unknown_parent_raises(self) -> None:
+        with pytest.raises(NameError):
+            _compile_declare(
+                DeclareDecl("Dog", (), extends="Ghost"),
+                {},
+            )
+
+
+# ===========================================================================
 # Type resolution
 # ===========================================================================
 

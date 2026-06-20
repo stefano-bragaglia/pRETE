@@ -102,6 +102,7 @@ class TestParseDeclare:
         dd = _parse("declare Marker\nend").declares[0]
         assert dd.name == "Marker"
         assert dd.fields == ()
+        assert dd.extends is None
 
     def test_one_field(self) -> None:
         fd = _parse("declare Temp\n  value: float\nend").declares[0].fields[0]
@@ -353,6 +354,35 @@ class TestParseConstraints:
         c = _first_constraint('/T[address.city == "NYC"]')
         assert isinstance(c, CompareConstraint)
         assert c.field == "address.city"
+
+
+# ===========================================================================
+# Error cases
+# ===========================================================================
+
+# ===========================================================================
+# extends
+# ===========================================================================
+
+class TestParseDeclareExtends:
+    """``extends`` clause in declare blocks is parsed into ``DeclareDecl.extends``."""
+
+    def test_extends_sets_field(self) -> None:
+        dd = _parse("declare Dog extends Animal\nend").declares[0]
+        assert dd.extends == "Animal"
+
+    def test_extends_name_stored(self) -> None:
+        dd = _parse("declare Dog extends Animal\n  breed: str\nend").declares[0]
+        assert dd.name == "Dog"
+        assert dd.extends == "Animal"
+
+    def test_no_extends_is_none(self) -> None:
+        dd = _parse("declare Animal\n  name: str\nend").declares[0]
+        assert dd.extends is None
+
+    def test_extends_missing_parent_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse("declare Dog extends\nend")
 
 
 # ===========================================================================
