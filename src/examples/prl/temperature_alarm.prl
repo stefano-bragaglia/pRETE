@@ -1,0 +1,17 @@
+// Temperature monitoring — appends Alert objects to injected list.
+declare Temperature
+  sensor: str
+  value: float
+end
+
+declare Alert
+  severity: str
+  message: str
+end
+
+rule "too-hot"
+  when
+    /Temperature[value >= 80, $sensor: sensor, $value: value]
+  then
+    alerts.append(Alert("HIGH", f"Sensor {sensor}: {value}°C"))
+end
