@@ -20,6 +20,7 @@ from rete.prl_ast import (
     FieldDecl,
     NccPatternGroup,
     PatternNode,
+    Tag,
 )
 from rete.prl import (
     _compile_declare,
@@ -163,6 +164,75 @@ class TestCompileDeclareExtends:
                 DeclareDecl("Dog", (), extends="Ghost"),
                 {},
             )
+
+
+# ===========================================================================
+# Declare compilation — @key (ES-3)
+# ===========================================================================
+
+class TestCompileDeclareKey:
+    """``@key`` field tags inject key-only equality and hashing."""
+
+    def test_no_key_uses_full_equality(self) -> None:
+        decl = DeclareDecl("T", (FieldDecl("a", "int"), FieldDecl("b", "int")))
+        cls = _compile_declare(decl, {})
+        assert cls(a=1, b=2) != cls(a=1, b=99)
+
+    def test_single_key_equal_when_key_matches(self) -> None:
+        decl = DeclareDecl("C", (
+            FieldDecl("id", "int", tags=(Tag("key"),)),
+            FieldDecl("name", "str"),
+        ))
+        cls = _compile_declare(decl, {})
+        assert cls(id=1, name="Alice") == cls(id=1, name="Bob")
+
+    def test_single_key_unequal_when_key_differs(self) -> None:
+        decl = DeclareDecl("C", (
+            FieldDecl("id", "int", tags=(Tag("key"),)),
+            FieldDecl("name", "str"),
+        ))
+        cls = _compile_declare(decl, {})
+        assert cls(id=1, name="Alice") != cls(id=2, name="Alice")
+
+    def test_single_key_hash_consistency(self) -> None:
+        decl = DeclareDecl("C", (
+            FieldDecl("id", "int", tags=(Tag("key"),)),
+            FieldDecl("name", "str"),
+        ))
+        cls = _compile_declare(decl, {})
+        assert hash(cls(id=1, name="Alice")) == hash(cls(id=1, name="Bob"))
+
+    def test_composite_key_all_match(self) -> None:
+        decl = DeclareDecl("O", (
+            FieldDecl("cid", "int", tags=(Tag("key"),)),
+            FieldDecl("oid", "int", tags=(Tag("key"),)),
+            FieldDecl("amount", "float"),
+        ))
+        cls = _compile_declare(decl, {})
+        assert cls(cid=1, oid=99, amount=10.0) == cls(cid=1, oid=99, amount=99.9)
+
+    def test_composite_key_partial_mismatch(self) -> None:
+        decl = DeclareDecl("O", (
+            FieldDecl("cid", "int", tags=(Tag("key"),)),
+            FieldDecl("oid", "int", tags=(Tag("key"),)),
+            FieldDecl("amount", "float"),
+        ))
+        cls = _compile_declare(decl, {})
+        assert cls(cid=1, oid=1, amount=5.0) != cls(cid=1, oid=2, amount=5.0)
+
+    def test_type_mismatch_returns_not_implemented(self) -> None:
+        decl = DeclareDecl("C", (FieldDecl("id", "int", tags=(Tag("key"),)),))
+        cls = _compile_declare(decl, {})
+        assert cls(id=1).__eq__("not-a-customer") is NotImplemented
+
+    def test_usable_as_dict_key(self) -> None:
+        decl = DeclareDecl("C", (
+            FieldDecl("id", "int", tags=(Tag("key"),)),
+            FieldDecl("name", "str"),
+        ))
+        cls = _compile_declare(decl, {})
+        d = {cls(id=1, name="Alice"): "first"}
+        assert d[cls(id=1, name="Bob")] == "first"
 
 
 # ===========================================================================

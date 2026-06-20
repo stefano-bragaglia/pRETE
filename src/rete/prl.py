@@ -31,6 +31,7 @@ from rete.prl_ast import (
     BindConstraint,
     CompareConstraint,
     DeclareDecl,
+    FieldDecl,
     NccPatternGroup,
     PatternNode,
 )
@@ -141,15 +142,66 @@ def _topo_sort_declares(
 def _compile_declare(decl: DeclareDecl, types: dict[str, type]) -> type:
     """Convert a ``DeclareDecl`` into a Python dataclass.
 
+    When any field carries ``@key``, the generated class uses ``eq=False``
+    so that a manually injected key-only ``__eq__`` / ``__hash__`` can be
+    assigned without being blocked by the dataclass-generated ``__hash__ = None``.
+
     :param decl: the declaration AST node.
     :param types: current type mapping (may include previously declared types).
     :returns: a new mutable dataclass class (not frozen — supports ``update``).
     """
     fields = [(fd.name, _java_type(fd.type_name, types)) for fd in decl.fields]
+    key_names = _key_fields(decl)
+    kwargs: dict = {"eq": False} if key_names else {}
     if decl.extends:
         parent = _resolve_type(decl.extends, types)
-        return make_dataclass(decl.name, fields, bases=(parent,))
-    return make_dataclass(decl.name, fields)
+        cls = make_dataclass(decl.name, fields, bases=(parent,), **kwargs)
+    else:
+        cls = make_dataclass(decl.name, fields, **kwargs)
+    if key_names:
+        _inject_key_eq(cls, key_names)
+    return cls
+
+
+def _key_fields(decl: DeclareDecl) -> tuple[str, ...]:
+    """Return the names of fields in *decl* that carry an ``@key`` tag.
+
+    Only inspects fields declared directly in *decl*, not inherited fields.
+
+    :param decl: the declaration AST node.
+    """
+    # ponytail: @key on inherited fields not supported; local fields only
+    return tuple(fd.name for fd in decl.fields if _has_key_tag(fd))
+
+
+def _has_key_tag(fd: FieldDecl) -> bool:
+    """Return True iff *fd* has at least one tag named ``"key"``.
+
+    :param fd: a field declaration node.
+    """
+    return any(t.name == "key" for t in fd.tags)
+
+
+def _inject_key_eq(cls: type, key_names: tuple[str, ...]) -> None:
+    """Assign key-field-only ``__eq__`` and ``__hash__`` to *cls*.
+
+    Called only when ``eq=False`` was passed to ``make_dataclass``, so
+    ``__hash__`` is still the identity-based ``object.__hash__`` and
+    can be overridden by direct assignment.
+
+    :param cls: the freshly created dataclass to patch.
+    :param key_names: ordered tuple of field names that form the identity key.
+    """
+    def __eq__(self: object, other: object) -> bool:
+        if type(self) is not type(other):
+            return NotImplemented  # type: ignore[return-value]
+        return all(getattr(self, f) == getattr(other, f) for f in key_names)
+
+    def __hash__(self: object) -> int:
+        return hash(tuple(getattr(self, f) for f in key_names))
+
+    cls.__eq__ = __eq__  # type: ignore[method-assign]
+    cls.__hash__ = __hash__  # type: ignore[method-assign]
 
 
 def _java_type(name: str, types: dict[str, type]) -> type:

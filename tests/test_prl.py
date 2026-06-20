@@ -524,6 +524,45 @@ class TestNoLoop:
 
 
 # ===========================================================================
+# @key field equality (ES-3)
+# ===========================================================================
+
+class TestKeyField:
+    """``@key`` produces key-only equality; WM still tracks facts by identity."""
+
+    def test_objects_with_same_key_are_equal(self) -> None:
+        _, types = _setup("declare C\n  @key\n  id: int\n  name: str\nend")
+        C = types["C"]
+        assert C(id=1, name="Alice") == C(id=1, name="Bob")
+
+    def test_objects_with_different_key_are_unequal(self) -> None:
+        _, types = _setup("declare C\n  @key\n  id: int\n  name: str\nend")
+        C = types["C"]
+        assert C(id=1, name="Alice") != C(id=2, name="Alice")
+
+    def test_separate_facts_retracted_independently(self) -> None:
+        """Two @key-equal objects in separate Facts are independently tracked."""
+        engine, types = _setup("declare C\n  @key\n  id: int\n  name: str\nend")
+        C = types["C"]
+        f1 = Fact(C(id=1, name="Alice"))
+        f2 = Fact(C(id=1, name="Bob"))
+        engine.add_fact(f1)
+        engine.add_fact(f2)
+        engine.remove_fact(f1)
+        assert f1 not in engine.network.conflict_set
+        assert f2.obj.name == "Bob"   # f2 still intact
+
+    def test_key_field_in_prl_source(self) -> None:
+        """End-to-end: @key parsed from PRL, equality works in caller code."""
+        _, types = _setup(
+            "declare Customer\n  @key\n  customerId: int\n  tier: str\nend"
+        )
+        C = types["Customer"]
+        assert C(customerId=42, tier="gold") == C(customerId=42, tier="silver")
+        assert C(customerId=1, tier="gold") != C(customerId=2, tier="gold")
+
+
+# ===========================================================================
 # Public API
 # ===========================================================================
 
