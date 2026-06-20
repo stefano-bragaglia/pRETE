@@ -1,0 +1,19 @@
+// Doorenbos §2.7 — negative conditions (NegativeJoinNode).
+// Expected match: x=B3 (on table and not blue).
+declare On
+  upper: str
+  lower: str
+end
+
+declare Color
+  block: str
+  color: str
+end
+
+rule "find-blocks-on-table-not-blue"
+  when
+    On(lower == "table", $x: upper)
+    not Color(block == $x, color == "blue")
+  then
+    results.append(x)
+end

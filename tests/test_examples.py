@@ -149,3 +149,48 @@ def test_fraud_detection():
     engine.remove_fact(auth)
     engine.run()
     assert fired == ["tx1", "tx1"]   # auth gone → NCC count=0 → re-fired
+
+
+# ---------------------------------------------------------------------------
+# Part C — PRL-loaded equivalents
+# ---------------------------------------------------------------------------
+
+
+class TestPrlExamples:
+    """PRL drivers produce the same results as the Python originals."""
+
+    def test_blocks_world_prl(self) -> None:
+        from examples.blocks_world_prl import _run
+        assert _run() == [("B1", "B2", "B3")]
+
+    def test_negation_prl(self) -> None:
+        from examples.negation_prl import _run
+        assert _run() == ["B3"]
+
+    def test_sharing_prl(self) -> None:
+        from examples.sharing_prl import _run
+        assert set(_run()) == {("B1", "B2", "B3"), ("B1", "B3", "B4")}
+
+    def test_loan_application_prl(self) -> None:
+        from examples.loan_application_prl import _run
+        alice, bob, carol = _run()
+        assert (alice.approved, alice.explanation) == (False, "Underage")
+        assert bob.approved is True
+        assert (carol.approved, carol.explanation) == (False, "Bankruptcy")
+
+    def test_temperature_alarm_prl(self) -> None:
+        from examples.temperature_alarm_prl import _run
+        alerts = _run()
+        assert len(alerts) == 1
+        assert "T2" in alerts[0].message
+
+    def test_family_tree_prl(self) -> None:
+        from examples.family_tree_prl import _run
+        assert _run() == {
+            ("A", "B"), ("A", "C"), ("A", "D"),
+            ("B", "C"), ("B", "D"), ("C", "D"),
+        }
+
+    def test_fraud_detection_prl(self) -> None:
+        from examples.fraud_detection_prl import _run
+        assert _run() == ["tx1", "tx1"]
