@@ -1416,3 +1416,26 @@ class TestAccumulate:
         an.children.append(late)
         an.update_child(late)
         assert late.activated[0].bindings["$total"] == 42.0
+
+    def test_initialize_from_seeds_with_tokens(self):
+        # line 525: _initialize_from loop body fires when tokens are provided
+        an, am, rec = self._make_node(self._sum_spec())
+        am.items.append(Fact(_Val(5.0)))
+        t1, t2 = Token(), Token()
+        an._initialize_from([t1, t2])
+        assert len(an.states) == 2
+        assert rec.activated[0].bindings["$total"] == 5.0
+
+    def test_left_activate_relinks_when_right_unlinked(self):
+        # lines 564-565: right-relink path in left_activate
+        am = self._am()
+        spec = self._sum_spec()
+        an = AccumulateNode(
+            children=[], alpha_memory=am, left_input=DummyTopNode(), tests=[], spec=spec
+        )
+        an.right_unlinked = True
+        rec = _Recorder()
+        an.children.append(rec)
+        an.left_activate(Token())
+        assert not an.right_unlinked
+        assert an in am.successors

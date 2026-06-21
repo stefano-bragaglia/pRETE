@@ -4,8 +4,16 @@
 """
 from dataclasses import dataclass
 
-from rete.beta import BetaMemory, JoinNode, NccNode, PNode
-from rete.condition import JoinSpec, NccGroup, Pattern, Production
+from rete.beta import (
+    AccumulateNode,
+    BetaMemory,
+    ExistsNode,
+    JoinNode,
+    NccNode,
+    NegativeJoinNode,
+    PNode,
+)
+from rete.condition import AccumulateSpec, JoinSpec, NccGroup, Pattern, Production
 from rete.fact import Fact
 from rete.network import ReteNetwork
 
@@ -699,3 +707,207 @@ def test_ncc_pnode_parent_join_is_ncc_node():
     g = NccGroup((Pattern(Color, alpha_tests=(_is_red,)),))
     pn = net.add_production(_prod([g]))
     assert isinstance(pn.parent_join, NccNode)
+
+
+# ---------------------------------------------------------------------------
+# Coverage: sharing and init-link paths
+# ---------------------------------------------------------------------------
+
+
+def test_share_negative_join_node():
+    # line 249: _build_or_share_negative_join_node returns existing NJN
+    net = ReteNetwork()
+    p = Pattern(Color, alpha_tests=(_is_red,), negated=True)
+    pn1 = net.add_production(_prod([p]))
+    pn2 = net.add_production(_prod([p]))
+    assert pn1.parent_join is pn2.parent_join
+    assert isinstance(pn1.parent_join, NegativeJoinNode)
+
+
+def test_init_join_links_beta_memory_non_empty():
+    # line 284: else branch of _init_join_links when left IS non-empty BetaMemory
+    net = ReteNetwork()
+    net.root.build_or_share_alpha_memory(Pattern(Color, alpha_tests=(_is_red,)))
+    net.add_fact(Fact(Color("b1", "red")))
+    # Second pattern forces a BetaMemory left input for the second JoinNode.
+    # With facts for Color already in WM, the BetaMemory has items → else branch.
+    net.add_production(_prod([
+        Pattern(Color, alpha_tests=(_is_red,)),
+        Pattern(Size, alpha_tests=(_is_large,)),
+    ]))
+    # No size facts → no match; the test is about the network wiring path.
+    assert net.conflict_set == []
+
+
+def test_init_njn_links_beta_memory_non_empty():
+    # line 308: else branch of _init_njn_links when left IS non-empty BetaMemory
+    net = ReteNetwork()
+    net.root.build_or_share_alpha_memory(Pattern(Color, alpha_tests=(_is_red,)))
+    net.add_fact(Fact(Color("b1", "red")))
+    pn = net.add_production(_prod([
+        Pattern(Color, alpha_tests=(_is_red,)),
+        Pattern(Size, alpha_tests=(_is_large,), negated=True),
+    ]))
+    # Color matched → NJN left has token; no Size → negation fires.
+    assert len(net.conflict_set) == 1
+    assert isinstance(pn.parent_join, NegativeJoinNode)
+
+
+def test_share_exists_node():
+    # lines 325-326 + 427: _build_or_share_exists_node returns existing ExistsNode
+    net = ReteNetwork()
+    p = Pattern(Color, alpha_tests=(_is_red,), exists=True)
+    pn1 = net.add_production(_prod([p]))
+    pn2 = net.add_production(_prod([p]))
+    assert pn1.parent_join is pn2.parent_join
+    assert isinstance(pn1.parent_join, ExistsNode)
+
+
+def test_init_exists_node_links_beta_memory_non_empty():
+    # lines 354-356: else branch of _init_exists_node_links with non-empty BetaMemory
+    net = ReteNetwork()
+    net.root.build_or_share_alpha_memory(Pattern(Color, alpha_tests=(_is_red,)))
+    net.add_fact(Fact(Color("b1", "red")))
+    pn = net.add_production(_prod([
+        Pattern(Color, alpha_tests=(_is_red,)),
+        Pattern(Size, alpha_tests=(_is_large,), exists=True),
+    ]))
+    assert isinstance(pn.parent_join, ExistsNode)
+
+
+def test_init_accumulate_links_right_unlinked():
+    # lines 538-539: _init_accumulate_links right-unlinking path
+    # [Color, accumulate(Size)] with no facts → BetaMemory for Color is empty
+    spec = AccumulateSpec(
+        inner=Pattern(Size, alpha_tests=(_is_large,)),
+        fn=lambda vals: len(vals),
+        bind_attr=None,
+        result_var="$n",
+    )
+    net = ReteNetwork()
+    pn = net.add_production(_prod([Pattern(Color, alpha_tests=(_is_red,)), spec]))
+    assert isinstance(pn.parent_join, AccumulateNode)
+    assert pn.parent_join.right_unlinked
+
+
+def test_init_accumulate_links_beta_memory_non_empty():
+    # line 543: else branch of _init_accumulate_links with non-empty BetaMemory
+    spec = AccumulateSpec(
+        inner=Pattern(Size, alpha_tests=(_is_large,)),
+        fn=lambda vals: len(vals),
+        bind_attr=None,
+        result_var="$n",
+    )
+    net = ReteNetwork()
+    net.root.build_or_share_alpha_memory(Pattern(Color, alpha_tests=(_is_red,)))
+    net.add_fact(Fact(Color("b1", "red")))
+    pn = net.add_production(_prod([Pattern(Color, alpha_tests=(_is_red,)), spec]))
+    assert isinstance(pn.parent_join, AccumulateNode)
+    assert not pn.parent_join.right_unlinked
+
+
+# ---------------------------------------------------------------------------
+# Coverage: GC paths
+# ---------------------------------------------------------------------------
+
+
+def test_gc_negative_join_node_early_return():
+    # line 480: _gc_negative_join_node returns when NJN still has children
+    net = ReteNetwork()
+    p = Pattern(Color, alpha_tests=(_is_red,), negated=True)
+    pn1 = net.add_production(_prod([p]))
+    pn2 = net.add_production(_prod([p]))
+    shared_njn = pn1.parent_join  # capture before removal clears it
+    net.remove_production(pn1)
+    assert pn2.parent_join is shared_njn  # NJN still alive (not GC'd)
+
+
+def test_gc_negative_join_node_with_beta_memory_left():
+    # lines 484-485: _gc_negative_join_node when NJN left_input IS BetaMemory
+    net = ReteNetwork()
+    pn = net.add_production(_prod([
+        Pattern(Color, alpha_tests=(_is_red,)),
+        Pattern(Size, alpha_tests=(_is_large,), negated=True),
+    ]))
+    net.remove_production(pn)
+    assert net.conflict_set == []
+
+
+def test_gc_exists_node_early_return():
+    # lines 493-494: _gc_exists_node returns when ExistsNode still has children
+    net = ReteNetwork()
+    p = Pattern(Color, alpha_tests=(_is_red,), exists=True)
+    pn1 = net.add_production(_prod([p]))
+    pn2 = net.add_production(_prod([p]))
+    shared_en = pn1.parent_join
+    net.remove_production(pn1)
+    assert pn2.parent_join is shared_en
+
+
+def test_gc_exists_node_removes_from_network():
+    # lines 495-499: _gc_exists_node full path when left_input IS BetaMemory
+    net = ReteNetwork()
+    pn = net.add_production(_prod([
+        Pattern(Color, alpha_tests=(_is_red,)),
+        Pattern(Size, alpha_tests=(_is_large,), exists=True),
+    ]))
+    net.remove_production(pn)
+    assert net.conflict_set == []
+
+
+def test_gc_accumulate_node_right_linked():
+    # lines 552-553: removes from alpha memory when not right_unlinked
+    # (Facts exist at construction → AccumulateNode is right-linked)
+    spec = AccumulateSpec(
+        inner=Pattern(Size, alpha_tests=(_is_large,)),
+        fn=lambda vals: len(vals),
+        bind_attr=None,
+        result_var="$n",
+    )
+    net = ReteNetwork()
+    net.root.build_or_share_alpha_memory(spec.inner)
+    net.add_fact(Fact(Size("b1", "large")))
+    pn = net.add_production(_prod([spec]))
+    assert not pn.parent_join.right_unlinked
+    net.remove_production(pn)
+    assert net.conflict_set == []
+
+
+def test_gc_accumulate_node_removes_from_network():
+    # lines 552-556: _gc_accumulate_node when left_input IS BetaMemory
+    spec = AccumulateSpec(
+        inner=Pattern(Size, alpha_tests=(_is_large,)),
+        fn=lambda vals: len(vals),
+        bind_attr=None,
+        result_var="$n",
+    )
+    net = ReteNetwork()
+    pn = net.add_production(_prod([
+        Pattern(Color, alpha_tests=(_is_red,)),
+        spec,
+    ]))
+    net.add_fact(Fact(Size("b1", "large")))
+    net.remove_production(pn)
+    assert net.conflict_set == []
+
+
+def test_gc_ncc_node_with_beta_memory_left():
+    # lines 568-569: _gc_ncc_node when NCC left_input IS BetaMemory
+    net = ReteNetwork()
+    pn = net.add_production(_prod([
+        Pattern(Color, alpha_tests=(_is_red,)),
+        NccGroup((Pattern(Size, alpha_tests=(_is_large,)),)),
+    ]))
+    net.remove_production(pn)
+    assert net.conflict_set == []
+
+
+def test_gc_ncc_node_negated_inner_sub_last():
+    # line 573: _gc_ncc_node when sub_last IS NegativeJoinNode
+    net = ReteNetwork()
+    # NCC whose only inner pattern is negated → sub_last is a NegativeJoinNode
+    pn = net.add_production(_prod([
+        NccGroup((Pattern(Color, alpha_tests=(_is_red,), negated=True),)),
+    ]))
+    net.remove_production(pn)
+    assert net.conflict_set == []

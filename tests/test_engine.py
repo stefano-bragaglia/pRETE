@@ -439,3 +439,61 @@ class TestCep:
         engine.run()
         assert f1 not in engine.network.root._facts
         assert f2 not in engine.network.root._facts
+
+    def test_is_stale_no_expires_delta(self):
+        # line 160: _is_stale returns False when expires_delta is absent from meta
+        _Reading.__prl_meta__ = {"role": "event", "timestamp_field": "ts"}
+        engine = InferenceEngine()
+        f = Fact(_Reading("s1", 0.0))
+        engine.add_fact(f)
+        engine.advance_clock(9999.0)
+        engine.run()
+        assert f in engine.network.root._facts
+
+    def test_is_stale_no_timestamp_field(self):
+        # line 162: _is_stale returns False when fact.timestamp is None
+        _Reading.__prl_meta__ = {"role": "event", "expires_delta": 30.0}
+        engine = InferenceEngine()
+        f = Fact(_Reading("s1", 0.0))
+        engine.add_fact(f)  # no timestamp_field → fact.timestamp stays None
+        engine.advance_clock(9999.0)
+        engine.run()
+        assert f in engine.network.root._facts
+
+
+# ---------------------------------------------------------------------------
+# no_loop — _changed_by_other
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Trigger:
+    value: int
+
+
+@dataclass
+class _Response:
+    value: int
+
+
+class TestNoLoop:
+    def test_no_loop_preserves_other_production_entries(self):
+        # line 33: _changed_by_other returns True for entries from other productions
+        engine = InferenceEngine()
+        fired_b = []
+
+        def rhs_a(token: Token) -> None:
+            engine.add_fact(Fact(_Response(1)))
+
+        engine.add_production(Production(
+            lhs=[Pattern(_Trigger)],
+            rhs=rhs_a,
+            no_loop=True,
+        ))
+        engine.add_production(Production(
+            lhs=[Pattern(_Response)],
+            rhs=lambda t: fired_b.append(1),
+        ))
+        engine.add_fact(Fact(_Trigger(1)))
+        engine.run()
+        assert fired_b == [1]
