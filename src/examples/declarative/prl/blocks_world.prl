@@ -1,0 +1,26 @@
+// Doorenbos §2.1 — canonical blocks-world example (Figure 2.2b).
+// Expected match: x=B1, y=B2, z=B3.
+
+declare On
+  upper: str
+  lower: str
+end
+
+declare LeftOf
+  left: str
+  right: str
+end
+
+declare Color
+  block: str
+  color: str
+end
+
+rule "find-stack-of-two-blocks-to-the-left-of-a-red-block"
+  when
+    On($x: upper, $y: lower)
+    LeftOf(left == $y, $z: right)
+    Color(block == $z, color == "red")
+  then
+    results.append((x, y, z))
+end

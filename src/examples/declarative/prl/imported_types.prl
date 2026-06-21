@@ -1,0 +1,11 @@
+// ES-5: import — .prl file resolves its own types via Python import.
+// Run with src/ on sys.path (hatch/pytest ensure this automatically).
+from examples.declarative.domain import Vehicle, Fleet
+
+rule "flag old vehicle in large fleet"
+  when
+    Fleet(size > 10)
+    Vehicle($yr: year, year < 2010)
+  then
+    flagged.append(yr)
+end

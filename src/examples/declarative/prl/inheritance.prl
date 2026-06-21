@@ -1,0 +1,19 @@
+// ES-1: type inheritance — a single Animal() pattern fires for Dog and Cat facts.
+declare Animal
+  name: str
+end
+
+declare Dog extends Animal
+  breed: str
+end
+
+declare Cat extends Animal
+  indoor: bool
+end
+
+rule "greet animal"
+  when
+    Animal($name: name)
+  then
+    results.append(name)
+end

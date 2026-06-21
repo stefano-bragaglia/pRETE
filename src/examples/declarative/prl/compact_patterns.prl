@@ -1,0 +1,19 @@
+// ES-4: positional and named constraint shorthand.
+declare Point
+  x: int
+  y: int
+end
+
+rule "origin positional"
+  when
+    Point(0, 0)
+  then
+    hits.append("origin-pos")
+end
+
+rule "x-axis named"
+  when
+    Point(y=0)
+  then
+    hits.append("x-axis-named")
+end

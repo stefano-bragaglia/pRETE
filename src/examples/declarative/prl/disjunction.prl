@@ -1,0 +1,18 @@
+// ES-6: or disjunction — rule fires when either branch matches.
+declare Person
+  name: str
+  age: int
+end
+
+declare Employee
+  name: str
+  status: str
+end
+
+rule "eligible"
+  when
+    Person($name: name, age > 18) or
+    Employee($name: name, status == "active")
+  then
+    results.append(name)
+end

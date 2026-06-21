@@ -1,0 +1,24 @@
+// Unauthorized transaction detection via NCC group.
+declare Transaction
+  id: str
+  account_id: str
+  amount: float
+end
+
+declare Account
+  id: str
+  limit: float
+end
+
+declare Authorization
+  transaction_id: str
+end
+
+rule "unauthorized"
+  when
+    Transaction($tx_id: id, $account_id: account_id)
+    Account(id == $account_id)
+    not ( Authorization(transaction_id == $tx_id) )
+  then
+    fired.append(tx_id)
+end

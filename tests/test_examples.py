@@ -13,21 +13,21 @@ from rete.fact import Fact
 
 
 def test_blocks_world():
-    from examples.blocks_world import _run, main
+    from examples.programmatic.blocks_world import _run, main
     results = _run()
     assert results == [("B1", "B2", "B3")]
     main()  # smoke-test: runs asserts embedded in main()
 
 
 def test_negation():
-    from examples.negation import _run, main
+    from examples.programmatic.negation import _run, main
     results = _run()
     assert results == ["B3"]
     main()
 
 
 def test_sharing():
-    from examples.sharing import _run, main
+    from examples.programmatic.sharing import _run, main
     results = _run()
     assert set(results) == {("B1", "B2", "B3"), ("B1", "B3", "B4")}
     main()
@@ -39,7 +39,7 @@ def test_sharing():
 
 
 def test_loan_application():
-    from examples.loan_application import (
+    from examples.programmatic.loan_application import (
         Applicant,
         Bankruptcy,
         LoanApplication,
@@ -77,7 +77,7 @@ def test_loan_application():
 
 
 def test_temperature_alarm():
-    from examples.temperature_alarm import Temperature, build_engine
+    from examples.programmatic.temperature_alarm import Temperature, build_engine
 
     alerts = []
     engine = build_engine(alerts)
@@ -97,7 +97,7 @@ def test_temperature_alarm():
 
 
 def test_family_tree():
-    from examples.family_tree import Parent, build_engine
+    from examples.programmatic.family_tree import Parent, build_engine
 
     known: set[tuple[str, str]] = set()
     engine = build_engine(known)
@@ -124,7 +124,7 @@ def test_family_tree():
 
 
 def test_fraud_detection():
-    from examples.fraud_detection import (
+    from examples.programmatic.fraud_detection import (
         Account,
         Authorization,
         Transaction,
@@ -160,37 +160,96 @@ class TestPrlExamples:
     """PRL drivers produce the same results as the Python originals."""
 
     def test_blocks_world_prl(self) -> None:
-        from examples.blocks_world_prl import _run
+        from examples.declarative.blocks_world_prl import _run
         assert _run() == [("B1", "B2", "B3")]
 
     def test_negation_prl(self) -> None:
-        from examples.negation_prl import _run
+        from examples.declarative.negation_prl import _run
         assert _run() == ["B3"]
 
     def test_sharing_prl(self) -> None:
-        from examples.sharing_prl import _run
+        from examples.declarative.sharing_prl import _run
         assert set(_run()) == {("B1", "B2", "B3"), ("B1", "B3", "B4")}
 
     def test_loan_application_prl(self) -> None:
-        from examples.loan_application_prl import _run
+        from examples.declarative.loan_application_prl import _run
         alice, bob, carol = _run()
         assert (alice.approved, alice.explanation) == (False, "Underage")
         assert bob.approved is True
         assert (carol.approved, carol.explanation) == (False, "Bankruptcy")
 
     def test_temperature_alarm_prl(self) -> None:
-        from examples.temperature_alarm_prl import _run
+        from examples.declarative.temperature_alarm_prl import _run
         alerts = _run()
         assert len(alerts) == 1
         assert "T2" in alerts[0].message
 
     def test_family_tree_prl(self) -> None:
-        from examples.family_tree_prl import _run
+        from examples.declarative.family_tree_prl import _run
         assert _run() == {
             ("A", "B"), ("A", "C"), ("A", "D"),
             ("B", "C"), ("B", "D"), ("C", "D"),
         }
 
     def test_fraud_detection_prl(self) -> None:
-        from examples.fraud_detection_prl import _run
+        from examples.declarative.fraud_detection_prl import _run
         assert _run() == ["tx1", "tx1"]
+
+
+# ===========================================================================
+# ES-1 through ES-9 examples
+# ===========================================================================
+
+
+class TestExtrasExamples:
+    """One test per ES-1 through ES-9 example driver."""
+
+    def test_inheritance_prl(self) -> None:
+        from examples.declarative.inheritance_prl import _run
+        assert _run() == ["Fluffy", "Rex"]
+
+    def test_identity_key_prl(self) -> None:
+        from examples.declarative.identity_key_prl import _run
+        eq_result, count = _run()
+        assert eq_result is True
+        assert count == 1
+
+    def test_compact_patterns_prl(self) -> None:
+        from examples.declarative.compact_patterns_prl import _run
+        assert _run() == {"origin-pos", "x-axis-named"}
+
+    def test_self_modify_prl(self) -> None:
+        from examples.declarative.self_modify_prl import _run
+        fire_count, scores = _run()
+        assert fire_count == 1
+        assert scores == [95]
+
+    def test_imported_types_prl(self) -> None:
+        from examples.declarative.imported_types_prl import _run
+        assert _run() == [2005]
+
+    def test_disjunction_prl(self) -> None:
+        from examples.declarative.disjunction_prl import _run
+        r1, r2 = _run()
+        assert r1 == ["Alice"]
+        assert r2 == ["Bob"]
+
+    def test_universal_prl(self) -> None:
+        from examples.declarative.universal_prl import _run
+        assert _run() == ["batch_ready"]
+
+    def test_existence_check_prl(self) -> None:
+        from examples.declarative.existence_check_prl import _run
+        assert _run() == ["A1"]
+
+    def test_event_stream_prl(self) -> None:
+        from examples.declarative.event_stream_prl import _run
+        pre, present = _run()
+        assert pre == 1
+        assert present is False
+
+    def test_aggregation_prl(self) -> None:
+        from examples.declarative.aggregation_prl import _run
+        phase1, phase2 = _run()
+        assert 1200.0 in phase1
+        assert phase2 == []

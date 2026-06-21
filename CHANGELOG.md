@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.5.0] — unreleased
+## [2.5.0] — 2026-06-21
 
 **Extending API change — PRL extra features.**
 
