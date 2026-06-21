@@ -126,6 +126,16 @@ class TestParseDeclare:
         dd = _parse("declare Temp\n  value: float\nend").declares[0]
         assert dd.fields[0].type_name == "float"
 
+    def test_stray_tag_before_end_ignored(self) -> None:
+        # line 171: stray @tag immediately before 'end' is stored-and-ignored
+        dd = _parse("declare Marker\n  @deprecated\nend").declares[0]
+        assert dd.fields == ()
+
+    def test_generic_type_name_stripped(self) -> None:
+        # lines 185, 189-196: Java-style generic in field type is skipped
+        dd = _parse("declare Box\n  items: List<String>\nend").declares[0]
+        assert dd.fields[0].type_name == "List"
+
 
 # ===========================================================================
 # Rule declaration

@@ -221,6 +221,10 @@ class TestComments:
         result = _kv("/* line1\nline2 */declare")
         assert result == [("KW", "declare")]
 
+    def test_line_comment_at_eof_no_newline(self) -> None:
+        # line 153: _skip_line_comment when comment reaches EOF without trailing \n
+        assert _kv("// end of file") == []
+
 
 # ===========================================================================
 # no-loop keyword

@@ -726,17 +726,18 @@ def test_share_negative_join_node():
 
 def test_init_join_links_beta_memory_non_empty():
     # line 284: else branch of _init_join_links when left IS non-empty BetaMemory
+    # Requires BOTH alpha memories to be non-empty at construction time so the
+    # second JoinNode takes the else branch (not the left-unlink elif).
     net = ReteNetwork()
     net.root.build_or_share_alpha_memory(Pattern(Color, alpha_tests=(_is_red,)))
+    net.root.build_or_share_alpha_memory(Pattern(Size, alpha_tests=(_is_large,)))
     net.add_fact(Fact(Color("b1", "red")))
-    # Second pattern forces a BetaMemory left input for the second JoinNode.
-    # With facts for Color already in WM, the BetaMemory has items → else branch.
+    net.add_fact(Fact(Size("b1", "large")))
     net.add_production(_prod([
         Pattern(Color, alpha_tests=(_is_red,)),
         Pattern(Size, alpha_tests=(_is_large,)),
     ]))
-    # No size facts → no match; the test is about the network wiring path.
-    assert net.conflict_set == []
+    assert len(net.conflict_set) == 1
 
 
 def test_init_njn_links_beta_memory_non_empty():
@@ -846,7 +847,10 @@ def test_gc_exists_node_early_return():
 
 def test_gc_exists_node_removes_from_network():
     # lines 495-499: _gc_exists_node full path when left_input IS BetaMemory
+    # Add Color facts first so the ExistsNode is NOT right-unlinked → line 496 hit.
     net = ReteNetwork()
+    net.root.build_or_share_alpha_memory(Pattern(Color, alpha_tests=(_is_red,)))
+    net.add_fact(Fact(Color("b1", "red")))
     pn = net.add_production(_prod([
         Pattern(Color, alpha_tests=(_is_red,)),
         Pattern(Size, alpha_tests=(_is_large,), exists=True),
