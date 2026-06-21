@@ -3,6 +3,8 @@
 A pure-Python implementation of the Rete algorithm for production rule systems,
 matching over arbitrary Python objects (POPOs — Plain Old Python Objects).
 
+![pRETE logo](images/pRETE-logo-small.png)
+
 > **v2.0.0 breaking change:** the `(id, attribute, value)` triple model has
 > been replaced by Drools-style pattern matching over `@dataclass` objects.
 > `WME`, `Condition`, and `WILDCARD` are removed; use `Fact`, `Pattern`, and
@@ -19,8 +21,6 @@ matching over arbitrary Python objects (POPOs — Plain Old Python Objects).
 > `import`, `or` disjunction, `forall`, `exists`, CEP event semantics, and
 > `accumulate`.  Engine changes are confined to `exists` (new `ExistsNode`),
 > CEP (`logical_clock`, event expiry), and `accumulate` (new `AccumulateNode`).
-
-![pRETE logo](images/pRETE-logo-small.png)
 
 ## Background
 
