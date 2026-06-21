@@ -400,6 +400,310 @@ class TestEndToEnd:
 
 
 # ===========================================================================
+# Inheritance (ES-1)
+# ===========================================================================
+
+class TestInheritance:
+    """``extends`` in declare — parent patterns fire for child-type facts."""
+
+    def test_parent_pattern_fires_for_child_fact(self) -> None:
+        fired: list[str] = []
+        src = (
+            "declare Animal\n  name: str\nend\n"
+            "declare Dog extends Animal\n  breed: str\nend\n"
+            'rule "animal" when\n'
+            "  $a: Animal()\n"
+            "then\n"
+            "  results.append(a.obj.name)\n"
+            "end\n"
+        )
+        engine, types = _setup(src, {"results": fired})
+        engine.add_fact(Fact(types["Dog"](name="Rex", breed="Lab")))
+        engine.run()
+        assert "Rex" in fired
+
+    def test_child_pattern_does_not_fire_for_sibling(self) -> None:
+        fired: list[str] = []
+        src = (
+            "declare Animal\n  name: str\nend\n"
+            "declare Dog extends Animal\n  breed: str\nend\n"
+            "declare Cat extends Animal\n  indoor: bool\nend\n"
+            'rule "dog" when\n'
+            "  $d: Dog()\n"
+            "then\n"
+            "  results.append(d.obj.name)\n"
+            "end\n"
+        )
+        engine, types = _setup(src, {"results": fired})
+        engine.add_fact(Fact(types["Cat"](name="Whiskers", indoor=True)))
+        engine.run()
+        assert fired == []
+
+    def test_two_levels_of_inheritance(self) -> None:
+        fired: list[str] = []
+        src = (
+            "declare Animal\n  name: str\nend\n"
+            "declare Dog extends Animal\n  breed: str\nend\n"
+            "declare Labrador extends Dog\n  colour: str\nend\n"
+            'rule "any animal" when\n'
+            "  $a: Animal()\n"
+            "then\n"
+            "  results.append(a.obj.name)\n"
+            "end\n"
+        )
+        engine, types = _setup(src, {"results": fired})
+        lab = types["Labrador"](name="Buddy", breed="Lab", colour="gold")
+        engine.add_fact(Fact(lab))
+        engine.run()
+        assert "Buddy" in fired
+
+
+# ===========================================================================
+# No-loop (ES-2)
+# ===========================================================================
+
+class TestNoLoop:
+    """``@no-loop`` prevents a rule re-activating itself via ``update``."""
+
+    def test_no_loop_tag_fires_once_despite_update(self) -> None:
+        results: list = []
+        src = (
+            "declare Counter\n  value: int\nend\n"
+            "@no-loop\n"
+            'rule "inc" when\n'
+            "  $c: Counter(value < 5)\n"
+            "then\n"
+            "  c.obj.value += 1\n"
+            "  results.append(c.obj.value)\n"
+            "  update(c)\n"
+            "end"
+        )
+        engine, types = _setup(src, {"results": results})
+        engine.add_fact(Fact(types["Counter"](value=0)))
+        fired = engine.run(max_steps=10)
+        assert fired == 1
+        assert len(results) == 1
+
+    def test_without_no_loop_fires_until_condition_fails(self) -> None:
+        """Without ``@no-loop`` the rule fires on every re-inserted match."""
+        results: list = []
+        src = (
+            "declare Counter\n  value: int\nend\n"
+            'rule "inc" when\n'
+            "  $c: Counter(value < 5)\n"
+            "then\n"
+            "  c.obj.value += 1\n"
+            "  results.append(c.obj.value)\n"
+            "  update(c)\n"
+            "end"
+        )
+        engine, types = _setup(src, {"results": results})
+        engine.add_fact(Fact(types["Counter"](value=0)))
+        engine.run()
+        assert len(results) == 5  # fires for 0→1, 1→2, 2→3, 3→4, 4→5
+
+    def test_no_loop_attribute_also_fires_once(self) -> None:
+        results: list = []
+        src = (
+            "declare Counter\n  value: int\nend\n"
+            'rule "inc"\n'
+            "  no-loop\n"
+            "when\n"
+            "  $c: Counter(value < 5)\n"
+            "then\n"
+            "  c.obj.value += 1\n"
+            "  results.append(c.obj.value)\n"
+            "  update(c)\n"
+            "end"
+        )
+        engine, types = _setup(src, {"results": results})
+        engine.add_fact(Fact(types["Counter"](value=0)))
+        fired = engine.run(max_steps=10)
+        assert fired == 1
+        assert len(results) == 1
+
+
+# ===========================================================================
+# @key field equality (ES-3)
+# ===========================================================================
+
+class TestKeyField:
+    """``@key`` produces key-only equality; WM still tracks facts by identity."""
+
+    def test_objects_with_same_key_are_equal(self) -> None:
+        _, types = _setup("declare C\n  @key\n  id: int\n  name: str\nend")
+        C = types["C"]
+        assert C(id=1, name="Alice") == C(id=1, name="Bob")
+
+    def test_objects_with_different_key_are_unequal(self) -> None:
+        _, types = _setup("declare C\n  @key\n  id: int\n  name: str\nend")
+        C = types["C"]
+        assert C(id=1, name="Alice") != C(id=2, name="Alice")
+
+    def test_separate_facts_retracted_independently(self) -> None:
+        """Two @key-equal objects in separate Facts are independently tracked."""
+        engine, types = _setup("declare C\n  @key\n  id: int\n  name: str\nend")
+        C = types["C"]
+        f1 = Fact(C(id=1, name="Alice"))
+        f2 = Fact(C(id=1, name="Bob"))
+        engine.add_fact(f1)
+        engine.add_fact(f2)
+        engine.remove_fact(f1)
+        assert f1 not in engine.network.conflict_set
+        assert f2.obj.name == "Bob"   # f2 still intact
+
+    def test_key_field_in_prl_source(self) -> None:
+        """End-to-end: @key parsed from PRL, equality works in caller code."""
+        _, types = _setup(
+            "declare Customer\n  @key\n  customerId: int\n  tier: str\nend"
+        )
+        C = types["Customer"]
+        assert C(customerId=42, tier="gold") == C(customerId=42, tier="silver")
+        assert C(customerId=1, tier="gold") != C(customerId=2, tier="gold")
+
+
+# ===========================================================================
+# Shorthand constraint patterns (ES-4)
+# ===========================================================================
+
+class TestShorthandPatterns:
+    """Integration: positional and named constraints match facts correctly."""
+
+    _POINT_SRC = "declare Point\n  x: int\n  y: int\nend\n"
+
+    def test_positional_both_match(self) -> None:
+        src = self._POINT_SRC + 'rule "r"\nwhen\n  Point(0, 0)\nthen\n  pass\nend'
+        _, _ = _setup(src)  # must compile without error
+
+    def test_positional_equivalent_to_compare(self) -> None:
+        pos = self._POINT_SRC + 'rule "r"\nwhen\n  Point(0, 0)\nthen\n  pass\nend'
+        cmp = self._POINT_SRC + \
+              'rule "r"\nwhen\n  Point(x == 0, y == 0)\nthen\n  pass\nend'
+        _, _ = _setup(pos)
+        _, _ = _setup(cmp)
+
+    def test_named_constraint_compiles(self) -> None:
+        src = self._POINT_SRC + 'rule "r"\nwhen\n  Point(y=0)\nthen\n  pass\nend'
+        _, _ = _setup(src)
+
+    def test_positional_fact_fires_rule(self) -> None:
+        results: list[str] = []
+        src = (
+            self._POINT_SRC
+            + 'rule "origin"\nwhen\n  Point(0, 0)\nthen\n  results.append("hit")\nend'
+        )
+        engine, types = _setup(src, ctx={"results": results})
+        engine.add_fact(Fact(types["Point"](x=0, y=0)))
+        engine.run()
+        assert results == ["hit"]
+
+    def test_positional_non_matching_fact_does_not_fire(self) -> None:
+        results: list[str] = []
+        src = (
+            self._POINT_SRC
+            + 'rule "origin"\nwhen\n  Point(0, 0)\nthen\n  results.append("hit")\nend'
+        )
+        engine, types = _setup(src, ctx={"results": results})
+        engine.add_fact(Fact(types["Point"](x=1, y=0)))
+        engine.run()
+        assert results == []
+
+    def test_named_fact_fires_rule(self) -> None:
+        results: list[str] = []
+        src = (
+            self._POINT_SRC
+            + 'rule "y-axis"\nwhen\n  Point(y=0)\nthen\n  results.append("hit")\nend'
+        )
+        engine, types = _setup(src, ctx={"results": results})
+        engine.add_fact(Fact(types["Point"](x=99, y=0)))
+        engine.run()
+        assert results == ["hit"]
+
+
+# ===========================================================================
+# Import integration (ES-5)
+# ===========================================================================
+
+class TestImportIntegration:
+    """End-to-end: imported types are usable in patterns and extends."""
+
+    def test_imported_type_in_pattern(self) -> None:
+        """A class imported via ``from … import`` can be matched in a LHS pattern."""
+        import sys
+        import types as _types_mod
+        from dataclasses import dataclass as _dc
+
+        @_dc
+        class Widget:
+            color: str
+
+        mod = _types_mod.ModuleType("_es5_widget_mod")
+        mod.Widget = Widget  # type: ignore[attr-defined]
+        sys.modules["_es5_widget_mod"] = mod
+        try:
+            results: list[str] = []
+            src = (
+                "from _es5_widget_mod import Widget\n"
+                'rule "r"\nwhen\n  Widget(color == "red")\n'
+                'then\n  results.append("fired")\nend'
+            )
+            engine, types = _setup(src, ctx={"results": results})
+            engine.add_fact(Fact(Widget(color="red")))
+            engine.run()
+            assert results == ["fired"]
+        finally:
+            del sys.modules["_es5_widget_mod"]
+
+    def test_import_available_before_declare(self) -> None:
+        """Imported type is available as a parent in ``extends``."""
+        import sys
+        import types as _types_mod
+        from dataclasses import make_dataclass
+        Base = make_dataclass("_ES5Base", [("score", int)])
+        fake_mod = _types_mod.ModuleType("_es5_test_mod")
+        fake_mod._ES5Base = Base  # type: ignore[attr-defined]
+        sys.modules["_es5_test_mod"] = fake_mod
+        try:
+            src = (
+                "from _es5_test_mod import _ES5Base\n"
+                "declare Child extends _ES5Base\n"
+                "  name: str\n"
+                "end\n"
+            )
+            types, _ = load_prl(src)
+            assert issubclass(types["Child"], Base)
+        finally:
+            del sys.modules["_es5_test_mod"]
+
+    def test_drools_style_import_in_pattern(self) -> None:
+        """``import module.ClassName`` form also makes the type available."""
+        import sys
+        import types as _types_mod
+        from dataclasses import dataclass as _dc
+
+        @_dc
+        class Gadget:
+            size: int
+
+        mod = _types_mod.ModuleType("_es5_gadget_mod")
+        mod.Gadget = Gadget  # type: ignore[attr-defined]
+        sys.modules["_es5_gadget_mod"] = mod
+        try:
+            results: list[str] = []
+            src = (
+                "import _es5_gadget_mod.Gadget\n"
+                'rule "r"\nwhen\n  Gadget(size == 42)\n'
+                'then\n  results.append("ok")\nend'
+            )
+            engine, types = _setup(src, ctx={"results": results})
+            engine.add_fact(Fact(Gadget(size=42)))
+            engine.run()
+            assert results == ["ok"]
+        finally:
+            del sys.modules["_es5_gadget_mod"]
+
+
+# ===========================================================================
 # Public API
 # ===========================================================================
 
@@ -409,3 +713,323 @@ class TestPublicApi:
     def test_load_prl_importable_from_rete(self) -> None:
         from rete import load_prl as _lp
         assert callable(_lp)
+
+
+# ===========================================================================
+# or disjunction integration (ES-6)
+# ===========================================================================
+
+class TestOrIntegration:
+    """End-to-end: either or-branch triggers the RHS."""
+
+    _SRC = (
+        "declare Vehicle\n  kind: str\nend\n"
+        'rule "flag"\n'
+        "when\n"
+        '  $v: Vehicle(kind == "car") or\n'
+        '  $v: Vehicle(kind == "truck")\n'
+        "then\n"
+        "  results.append(v.obj.kind)\n"
+        "end\n"
+    )
+
+    def test_first_branch_fires(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Vehicle"](kind="car")))
+        engine.run()
+        assert "car" in results
+
+    def test_second_branch_fires(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Vehicle"](kind="truck")))
+        engine.run()
+        assert "truck" in results
+
+    def test_non_matching_does_not_fire(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Vehicle"](kind="bike")))
+        engine.run()
+        assert results == []
+
+    def test_two_productions_registered(self) -> None:
+        _, prods = load_prl(self._SRC)
+        assert len(prods) == 2
+
+    def test_both_branches_fire_independently(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Vehicle"](kind="car")))
+        engine.add_fact(Fact(types["Vehicle"](kind="truck")))
+        engine.run()
+        assert set(results) == {"car", "truck"}
+
+
+# ===========================================================================
+# forall integration (ES-6)
+# ===========================================================================
+
+class TestForallIntegration:
+    """End-to-end: forall fires when universal condition holds."""
+
+    _SRC = (
+        "declare Order\n  status: str\nend\n"
+        "declare Approval\n  ref: str\nend\n"
+        'rule "all approved"\n'
+        "when\n"
+        "  forall(Order(), Approval())\n"
+        "then\n"
+        '  results.append("ok")\n'
+        "end\n"
+    )
+
+    def test_fires_when_no_order(self) -> None:
+        """No orders → vacuously true → rule fires."""
+        results: list[str] = []
+        engine, _ = _setup(self._SRC, ctx={"results": results})
+        engine.run()
+        assert results == ["ok"]
+
+    def test_does_not_fire_when_order_without_approval(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Order"](status="pending")))
+        engine.run()
+        assert results == []
+
+    def test_fires_when_order_has_approval(self) -> None:
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Order"](status="pending")))
+        engine.add_fact(Fact(types["Approval"](ref="x")))
+        engine.run()
+        assert results == ["ok"]
+
+    def test_retracting_approval_unblocks(self) -> None:
+        """Removing the Approval re-blocks the rule (retraction propagates)."""
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        order = Fact(types["Order"](status="pending"))
+        approval = Fact(types["Approval"](ref="x"))
+        engine.add_fact(order)
+        engine.add_fact(approval)
+        engine.run()
+        assert "ok" in results
+        results.clear()
+        engine.remove_fact(approval)
+        engine.run()
+        assert results == []
+
+
+# ===========================================================================
+# exists integration (ES-7)
+# ===========================================================================
+
+
+class TestExistsIntegration:
+    """End-to-end: exists fires once per left-token regardless of right count."""
+
+    _SRC = (
+        "declare Account\n  name: str\nend\n"
+        "declare Invoice\n  overdue: bool\nend\n"
+        'rule "alert"\n'
+        "when\n"
+        "  $acc: Account()\n"
+        "  exists Invoice(overdue == true)\n"
+        "then\n"
+        "  results.append(acc.obj.name)\n"
+        "end\n"
+    )
+
+    def test_fires_once_with_two_invoices(self) -> None:
+        """Rule fires once per account even when two matching invoices exist."""
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Account"](name="alice")))
+        engine.add_fact(Fact(types["Invoice"](overdue=True)))
+        engine.add_fact(Fact(types["Invoice"](overdue=True)))
+        engine.run()
+        assert results.count("alice") == 1
+
+    def test_does_not_fire_without_invoice(self) -> None:
+        """Rule does not fire when no overdue invoice exists."""
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Account"](name="alice")))
+        engine.run()
+        assert results == []
+
+    def test_retract_last_invoice_clears_activation(self) -> None:
+        """Retracting the last matching invoice removes the pending activation."""
+        results: list[str] = []
+        engine, types = _setup(self._SRC, ctx={"results": results})
+        engine.add_fact(Fact(types["Account"](name="alice")))
+        invoice = Fact(types["Invoice"](overdue=True))
+        engine.add_fact(invoice)
+        engine.remove_fact(invoice)
+        engine.run()
+        assert results == []
+
+
+# ===========================================================================
+# CEP integration
+# ===========================================================================
+
+
+_CEP_SRC = """\
+@role(event)
+@expires(30s)
+declare Reading
+  @timestamp
+  ts: float
+  sensor: str
+end
+
+declare Plain
+  value: int
+end
+"""
+
+
+class TestCepIntegration:
+    def test_event_present_before_clock_advance(self) -> None:
+        engine, types = _setup(_CEP_SRC)
+        fired = []
+        from rete.condition import Pattern, Production
+        engine.add_production(Production(
+            lhs=[Pattern(types["Reading"])],
+            rhs=lambda t: fired.append(1),
+        ))
+        engine.add_fact(Fact(types["Reading"](ts=0.0, sensor="s1")))
+        engine.run()
+        assert fired == [1]
+
+    def test_event_auto_retracted_after_advance(self) -> None:
+        engine, types = _setup(_CEP_SRC)
+        f = Fact(types["Reading"](ts=0.0, sensor="s1"))
+        engine.add_fact(f)
+        engine.advance_clock(31.0)
+        engine.run()
+        assert f not in engine.network.root._facts
+
+    def test_non_event_not_retracted(self) -> None:
+        engine, types = _setup(_CEP_SRC)
+        f = Fact(types["Plain"](value=42))
+        engine.add_fact(f)
+        engine.advance_clock(9999.0)
+        engine.run()
+        assert f in engine.network.root._facts
+
+
+# ===========================================================================
+# Accumulate integration
+# ===========================================================================
+
+
+_ACC_SRC = """\
+declare Order
+  amount: float
+end
+
+rule "sum orders"
+  when
+    accumulate(
+      Order($amount: amount);
+      $total: sum($amount)
+    )
+  then
+    results.append($total)
+end
+"""
+
+_ACC_CONSTRAINED_SRC = """\
+declare Order
+  amount: float
+end
+
+rule "flag large total"
+  when
+    accumulate(
+      Order($amount: amount);
+      $total: sum($amount);
+      $total > 100
+    )
+  then
+    results.append($total)
+end
+"""
+
+_ACC_COUNT_SRC = """\
+declare Order
+  amount: float
+end
+
+rule "count orders"
+  when
+    accumulate(
+      Order($amount: amount);
+      $n: count()
+    )
+  then
+    results.append($n)
+end
+"""
+
+
+class TestAccumulateIntegration:
+    def test_sum_no_facts_fires_zero(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_SRC, {"results": results})
+        engine.run()
+        assert results == [0]
+
+    def test_sum_single_fact(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=50.0)))
+        engine.run()
+        assert results[-1] == 50.0
+
+    def test_sum_multiple_facts(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=30.0)))
+        engine.add_fact(Fact(types["Order"](amount=20.0)))
+        engine.run()
+        assert results[-1] == 50.0
+
+    def test_sum_updates_on_retract(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_SRC, {"results": results})
+        f = Fact(types["Order"](amount=30.0))
+        engine.add_fact(f)
+        engine.add_fact(Fact(types["Order"](amount=20.0)))
+        engine.run()
+        results.clear()
+        engine.remove_fact(f)
+        engine.run()
+        assert results[-1] == 20.0
+
+    def test_count_fires(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_COUNT_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=1.0)))
+        engine.add_fact(Fact(types["Order"](amount=2.0)))
+        engine.run()
+        assert results[-1] == 2
+
+    def test_constraint_blocks_below_threshold(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_CONSTRAINED_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=50.0)))
+        engine.run()
+        assert results == []
+
+    def test_constraint_fires_above_threshold(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_CONSTRAINED_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=150.0)))
+        engine.run()
+        assert results == [150.0]

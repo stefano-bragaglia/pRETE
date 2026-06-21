@@ -17,8 +17,10 @@ __all__ = ["Tok", "tokenize"]
 # ---------------------------------------------------------------------------
 
 _KEYWORDS: frozenset[str] = frozenset({
-    "package", "declare", "rule", "end",
+    "package", "declare", "extends", "rule", "end",
     "when", "then", "not", "salience",
+    "import", "from", "as",
+    "or", "forall", "exists", "accumulate",
     "true", "false", "null", "None",
     "True", "False",
 })
@@ -30,6 +32,7 @@ _SILENT: frozenset[str] = frozenset({"COMMENT_BLOCK", "COMMENT_LINE", "SPACE"})
 # FLOAT before INT so '3.14' is not split at the dot.
 # Two-char OP alternatives before one-char to avoid '<' eating '<='.
 # COMMENT groups before PUNCT so '//' is not two PUNCT('/') tokens.
+# AT before PUNCT so '@' is not left unmatched (absent from PUNCT charset).
 _MASTER = re.compile(
     r"(?P<COMMENT_BLOCK>/\*.*?\*/)"
     r"|(?P<COMMENT_LINE>//[^\n]*)"
@@ -38,8 +41,9 @@ _MASTER = re.compile(
     r"|(?P<INT>\d+)"
     r"|(?P<STRING>\"[^\"\\]*(?:\\.[^\"\\]*)*\"|'[^'\\]*(?:\\.[^'\\]*)*')"
     r"|(?P<VAR>\$[A-Za-z_]\w*)"
-    r"|(?P<OP>==|!=|<=|>=|<|>)"
+    r"|(?P<OP>==|!=|<=|>=|<|>|=)"
     r"|(?P<WORD>[A-Za-z_]\w*)"
+    r"|(?P<AT>@)"
     r"|(?P<PUNCT>[,./()[\]{};:\-])"
     r"|(?P<SPACE>[ \t\r\n]+)",
     re.DOTALL,

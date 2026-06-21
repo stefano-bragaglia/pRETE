@@ -6,14 +6,21 @@ Converts a flat list of :class:`~rete.prl_lexer.Tok` instances produced by
 from __future__ import annotations
 
 from rete.prl_ast import (
+    AccumulateExpr,
     BindConstraint,
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    ForallNode,
+    ImportDecl,
+    NamedConstraint,
     NccPatternGroup,
+    OrGroup,
     PatternNode,
+    PositionalConstraint,
     ProgramNode,
     RuleDecl,
+    Tag,
 )
 from rete.prl_lexer import Tok
 
@@ -26,6 +33,26 @@ _BOOL_LITERALS: dict[str, bool | None] = {
     "true": True, "false": False,
     "None": None, "null": None,
 }
+
+_VALUE_KW: frozenset[str] = frozenset(_BOOL_LITERALS)
+
+_VALUE_KINDS: frozenset[str] = frozenset({"INT", "FLOAT", "STRING"})
+
+
+def _is_value_token(t: Tok | None) -> bool:
+    """Return True if *t* starts a value literal (not a field path)."""
+    if t is None:
+        return False
+    if t.kind in _VALUE_KINDS:
+        return True
+    return _is_minus_or_bool_kw(t)
+
+
+def _is_minus_or_bool_kw(t: Tok) -> bool:
+    """Return True if *t* is a unary minus or a boolean/null keyword."""
+    if t.kind == "PUNCT" and t.value == "-":
+        return True
+    return t.kind == "KW" and t.value in _VALUE_KW
 
 
 class Parser:
@@ -48,29 +75,77 @@ class Parser:
     # ------------------------------------------------------------------
 
     def _parse_program(self) -> ProgramNode:
+        imports: list[ImportDecl] = []
         declares: list[DeclareDecl] = []
         rules: list[RuleDecl] = []
         while not self._at_end():
-            self._parse_top_level(declares, rules)
-        return ProgramNode(tuple(declares), tuple(rules))
+            self._parse_top_level(imports, declares, rules)
+        return ProgramNode(tuple(declares), tuple(rules), tuple(imports))
 
     def _parse_top_level(
         self,
+        imports: list[ImportDecl],
         declares: list[DeclareDecl],
         rules: list[RuleDecl],
     ) -> None:
+        tags = self._parse_tags()
         if self._peek_kw("package"):
             self._skip_package()
         elif self._peek_kw("declare"):
-            declares.append(self._parse_declare())
+            declares.append(self._parse_declare(tags))
         elif self._peek_kw("rule"):
-            rules.append(self._parse_rule())
+            rules.append(self._parse_rule(tags))
+        elif self._try_import(imports):
+            pass
         else:
             t = self._peek()
             raise SyntaxError(
-                f"Expected 'package', 'declare', or 'rule' at line "
-                f"{getattr(t, 'line', '?')}, got {getattr(t, 'value', t)!r}"
+                f"Expected 'package', 'declare', 'rule', 'import', or 'from' "
+                f"at line {getattr(t, 'line', '?')}, got {getattr(t, 'value', t)!r}"
             )
+
+    def _try_import(self, imports: list[ImportDecl]) -> bool:
+        """Consume one import statement if present; return True when found."""
+        if self._peek_kw("import"):
+            imports.append(self._parse_import_stmt())
+            return True
+        if self._peek_kw("from"):
+            imports.append(self._parse_from_stmt())
+            return True
+        return False
+
+    def _parse_import_stmt(self) -> ImportDecl:
+        """Parse ``import a.b.ClassName [as Alias]``."""
+        self._expect("KW", "import")
+        qualified = self._parse_field_path()
+        alias = self._parse_optional_as() or qualified.rpartition(".")[2]
+        return ImportDecl(((qualified, alias),))
+
+    def _parse_from_stmt(self) -> ImportDecl:
+        """Parse ``from a.b import Name [as Alias] [, ...]``."""
+        self._expect("KW", "from")
+        module = self._parse_field_path()
+        self._expect("KW", "import")
+        return ImportDecl(self._parse_import_names(module))
+
+    def _parse_import_names(self, module: str) -> tuple[tuple[str, str], ...]:
+        names = [self._parse_one_import_name(module)]
+        while self._peek_punct(","):
+            self._advance()
+            names.append(self._parse_one_import_name(module))
+        return tuple(names)
+
+    def _parse_one_import_name(self, module: str) -> tuple[str, str]:
+        name = self._expect("IDENT").value
+        alias = self._parse_optional_as() or name
+        return (f"{module}.{name}", alias)
+
+    def _parse_optional_as(self) -> str | None:
+        """Consume ``as IDENT`` if present and return the alias; else None."""
+        if self._peek_kw("as"):
+            self._advance()
+            return self._expect("IDENT").value
+        return None
 
     def _skip_package(self) -> None:
         self._advance()  # consume 'package'
@@ -82,20 +157,27 @@ class Parser:
     # Declarations
     # ------------------------------------------------------------------
 
-    def _parse_declare(self) -> DeclareDecl:
+    def _parse_declare(self, tags: tuple[Tag, ...] = ()) -> DeclareDecl:
         self._expect("KW", "declare")
         name = self._expect("IDENT").value
+        extends: str | None = None
+        if self._peek_kw("extends"):
+            self._advance()
+            extends = self._expect("IDENT").value
         fields: list[FieldDecl] = []
         while not self._peek_kw("end"):
-            fields.append(self._parse_field())
+            field_tags = self._parse_tags()
+            if self._peek_kw("end"):
+                break  # stray tags before 'end' — store-and-ignore policy
+            fields.append(self._parse_field(field_tags))
         self._expect("KW", "end")
-        return DeclareDecl(name, tuple(fields))
+        return DeclareDecl(name, tuple(fields), extends, tags)
 
-    def _parse_field(self) -> FieldDecl:
+    def _parse_field(self, tags: tuple[Tag, ...] = ()) -> FieldDecl:
         name = self._expect("IDENT").value
         self._expect("PUNCT", ":")
         type_name = self._parse_type_ref()
-        return FieldDecl(name, type_name)
+        return FieldDecl(name, type_name, tags)
 
     def _parse_type_ref(self) -> str:
         name = self._expect("IDENT").value
@@ -117,31 +199,32 @@ class Parser:
     # Rules and attributes
     # ------------------------------------------------------------------
 
-    def _parse_rule(self) -> RuleDecl:
+    def _parse_rule(self, tags: tuple[Tag, ...] = ()) -> RuleDecl:
         self._expect("KW", "rule")
         name = self._expect("STRING").value[1:-1]
-        salience = self._parse_rule_attrs()
+        salience, no_loop = self._parse_rule_attrs()
         self._expect("KW", "when")
         lhs = self._parse_lhs()
         self._expect("KW", "then")
         rhs_src = self._expect("RAWBLOCK").value
         self._expect("KW", "end")
-        return RuleDecl(name, salience, lhs, rhs_src)
+        return RuleDecl(name, salience, no_loop, lhs, rhs_src, tags)
 
-    def _parse_rule_attrs(self) -> int:
+    def _parse_rule_attrs(self) -> tuple[int, bool]:
         salience = 0
+        no_loop = False
         while not self._peek_kw("when"):
-            salience = self._parse_one_attr(salience)
-        return salience
+            salience, no_loop = self._parse_one_attr(salience, no_loop)
+        return salience, no_loop
 
-    def _parse_one_attr(self, salience: int) -> int:
+    def _parse_one_attr(self, salience: int, no_loop: bool) -> tuple[int, bool]:
         if self._peek_kw("salience"):
             self._advance()
-            return self._parse_int()
+            return self._parse_int(), no_loop
         if self._peek_kw("no-loop"):
             self._advance()
             self._try_bool()
-            return salience
+            return salience, True
         t = self._peek()
         raise SyntaxError(
             f"Unknown rule attribute at line {getattr(t, 'line', '?')}: "
@@ -157,16 +240,91 @@ class Parser:
     # LHS and conditions
     # ------------------------------------------------------------------
 
-    def _parse_lhs(self) -> tuple[PatternNode | NccPatternGroup, ...]:
-        conds: list[PatternNode | NccPatternGroup] = []
-        while not self._peek_kw("then"):
-            conds.append(self._parse_condition())
-        return tuple(conds)
+    def _parse_lhs(self) -> tuple:
+        """Parse the LHS condition list, handling ``or`` branches.
 
-    def _parse_condition(self) -> PatternNode | NccPatternGroup:
+        Returns a flat tuple of conditions when no ``or`` is found,
+        or a single-element tuple containing an :class:`OrGroup` otherwise.
+        """
+        branches: list[tuple] = []
+        current: list = []
+        while not self._peek_kw("then"):
+            current.append(self._parse_condition())
+            if self._peek_kw("or"):
+                self._advance()
+                branches.append(tuple(current))
+                current = []
+        if not branches:
+            return tuple(current)
+        branches.append(tuple(current))
+        return (OrGroup(tuple(branches)),)
+
+    def _parse_condition(
+        self,
+    ) -> PatternNode | NccPatternGroup | ForallNode | AccumulateExpr:
         if self._peek_kw("not"):
             return self._parse_negated()
+        if self._peek_kw("forall"):
+            return self._parse_forall()
+        if self._peek_kw("exists"):
+            return self._parse_exists()
+        if self._peek_kw("accumulate"):
+            return self._parse_accumulate()
         return self._parse_pattern()
+
+    def _parse_accumulate(self) -> AccumulateExpr:
+        """Parse ``accumulate(inner; $result: fn($var); constraint?)``."""
+        self._expect("KW", "accumulate")
+        self._expect("PUNCT", "(")
+        inner = self._parse_pattern()
+        self._expect("PUNCT", ";")
+        result_var, function, bind_var = self._parse_result_binding()
+        constraint = self._parse_acc_constraint(result_var)
+        self._expect("PUNCT", ")")
+        return AccumulateExpr(
+            inner=inner,
+            result_var=result_var,
+            function=function,
+            bind_var=bind_var,
+            constraint=constraint,
+        )
+
+    def _parse_result_binding(self) -> tuple[str, str, str | None]:
+        """Parse ``$result: fn($var?)`` and return ``(result_var, function, bind_var)``.
+
+        :returns: ``(result_var, function_name, bind_var)`` where *bind_var* is
+            ``None`` for ``count()``.
+        """
+        result_var = self._expect("VAR").value
+        self._expect("PUNCT", ":")
+        function = self._expect("IDENT").value
+        self._expect("PUNCT", "(")
+        bind_var: str | None = None
+        if self._peek_kind("VAR"):
+            bind_var = self._advance().value
+        self._expect("PUNCT", ")")
+        return result_var, function, bind_var
+
+    def _parse_acc_constraint(
+        self, result_var: str
+    ) -> CompareConstraint | None:
+        """Parse optional ``;  $result OP literal`` constraint.
+
+        :param result_var: the result variable (used as the constraint field).
+        :returns: :class:`CompareConstraint` or ``None`` if no constraint present.
+        """
+        if not self._peek_punct(";"):
+            return None
+        self._advance()
+        self._expect("VAR", result_var)
+        op = self._expect("OP").value
+        rhs = self._parse_literal()
+        return CompareConstraint(result_var, op, rhs)
+
+    def _parse_exists(self) -> PatternNode:
+        """Parse ``exists Pattern(…)`` — existential check without binding."""
+        self._expect("KW", "exists")
+        return self._parse_pattern(exists=True)
 
     def _parse_negated(self) -> PatternNode | NccPatternGroup:
         self._expect("KW", "not")
@@ -184,15 +342,29 @@ class Parser:
         self._expect("PUNCT", ")")
         return NccPatternGroup(tuple(patterns))
 
+    def _parse_forall(self) -> ForallNode:
+        """Parse ``forall(P, Q)`` — two comma-separated patterns in parens."""
+        self._expect("KW", "forall")
+        self._expect("PUNCT", "(")
+        pattern = self._parse_pattern()
+        self._expect("PUNCT", ",")
+        condition = self._parse_pattern()
+        self._expect("PUNCT", ")")
+        return ForallNode(pattern, condition)
+
     # ------------------------------------------------------------------
     # Patterns
     # ------------------------------------------------------------------
 
-    def _parse_pattern(self, negated: bool = False) -> PatternNode:
+    def _parse_pattern(
+        self, negated: bool = False, exists: bool = False
+    ) -> PatternNode:
         fact_var = self._try_fact_binding()
+        if fact_var and (exists or self._peek_kw("exists")):
+            raise SyntaxError("'exists' patterns cannot bind a fact variable")
         if self._peek_punct("/"):
-            return self._parse_oopath(fact_var, negated)
-        return self._parse_traditional(fact_var, negated)
+            return self._parse_oopath(fact_var, negated, exists)
+        return self._parse_traditional(fact_var, negated, exists)
 
     def _try_fact_binding(self) -> str | None:
         t = self._peek()
@@ -209,7 +381,7 @@ class Parser:
         return t.kind == "PUNCT" and t.value == ":"
 
     def _parse_oopath(
-        self, fact_var: str | None, negated: bool
+        self, fact_var: str | None, negated: bool, exists: bool = False
     ) -> PatternNode:
         self._expect("PUNCT", "/")
         type_name = self._expect("IDENT").value
@@ -218,10 +390,10 @@ class Parser:
             self._advance()
             constraints = self._parse_constraints("]")
             self._expect("PUNCT", "]")
-        return PatternNode(type_name, fact_var, constraints, negated)
+        return PatternNode(type_name, fact_var, constraints, negated, exists)
 
     def _parse_traditional(
-        self, fact_var: str | None, negated: bool
+        self, fact_var: str | None, negated: bool, exists: bool = False
     ) -> PatternNode:
         type_name = self._expect("IDENT").value
         self._expect("PUNCT", "(")
@@ -229,7 +401,7 @@ class Parser:
         if not self._peek_punct(")"):
             constraints = self._parse_constraints(")")
         self._expect("PUNCT", ")")
-        return PatternNode(type_name, fact_var, constraints, negated)
+        return PatternNode(type_name, fact_var, constraints, negated, exists)
 
     # ------------------------------------------------------------------
     # Constraints
@@ -245,10 +417,24 @@ class Parser:
                 self._advance()
         return tuple(clist)
 
-    def _parse_constraint(self) -> BindConstraint | CompareConstraint:
+    def _parse_constraint(self):
+        if self._is_positional_start():
+            return self._parse_positional()
+        if self._is_named_start():
+            return self._parse_named()
         if self._peek_kind("VAR"):
             return self._parse_bind()
         return self._parse_compare()
+
+    def _is_positional_start(self) -> bool:
+        """Return True if the next token starts a positional constraint."""
+        if self._peek_kind("VAR"):
+            return not self._peek2_punct(":")
+        return _is_value_token(self._peek())
+
+    def _is_named_start(self) -> bool:
+        """Return True if the next tokens form ``IDENT =`` (named constraint)."""
+        return self._peek_kind("IDENT") and self._peek2_eq()
 
     def _parse_bind(self) -> BindConstraint:
         var = self._expect("VAR").value
@@ -261,6 +447,22 @@ class Parser:
         op = self._expect("OP").value
         rhs = self._parse_value()
         return CompareConstraint(field, op, rhs)
+
+    def _parse_positional(self) -> PositionalConstraint:
+        return PositionalConstraint(self._parse_value())
+
+    def _parse_named(self) -> NamedConstraint:
+        field = self._expect("IDENT").value
+        self._expect("OP", "=")
+        return NamedConstraint(field, self._parse_value())
+
+    def _peek2_eq(self) -> bool:
+        t = self._toks[self._pos + 1] if self._pos + 1 < len(self._toks) else None
+        return t is not None and t.kind == "OP" and t.value == "="
+
+    def _peek2_punct(self, v: str) -> bool:
+        t = self._toks[self._pos + 1] if self._pos + 1 < len(self._toks) else None
+        return t is not None and t.kind == "PUNCT" and t.value == v
 
     def _parse_field_path(self) -> str:
         parts = [self._expect("IDENT").value]
@@ -314,6 +516,43 @@ class Parser:
         tok = self._expect("INT")
         val = int(tok.value)
         return -val if neg else val
+
+    # ------------------------------------------------------------------
+    # Tag parsing
+    # ------------------------------------------------------------------
+
+    def _parse_tags(self) -> tuple[Tag, ...]:
+        """Collect zero or more ``@name`` / ``@name(value)`` annotations."""
+        tags: list[Tag] = []
+        while self._peek_kind("AT"):
+            tags.append(self._parse_one_tag())
+        return tuple(tags)
+
+    def _parse_one_tag(self) -> Tag:
+        """Parse a single tag; tag name may be IDENT or KW (e.g. ``no-loop``)."""
+        self._expect("AT")
+        t = self._peek()
+        if t is None or t.kind not in ("IDENT", "KW"):
+            raise SyntaxError(
+                f"Expected tag name after '@' at line {getattr(t, 'line', '?')}"
+            )
+        name = self._advance().value
+        value: str | None = None
+        if self._peek_punct("("):
+            self._advance()
+            value = self._collect_tag_value()
+            self._expect("PUNCT", ")")
+        return Tag(name, value)
+
+    def _collect_tag_value(self) -> str:
+        """Consume tokens up to ``)``, joining their text."""
+        parts: list[str] = []
+        while not self._peek_punct(")"):
+            t = self._peek()
+            if t is None:
+                raise SyntaxError("Unterminated tag value: missing ')'")
+            parts.append(self._advance().value)
+        return "".join(parts)
 
     # ------------------------------------------------------------------
     # Token utilities

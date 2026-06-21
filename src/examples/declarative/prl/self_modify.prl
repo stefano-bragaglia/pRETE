@@ -1,0 +1,15 @@
+// ES-2: @no-loop tag — rule inserts a new Score that would re-match,
+// but fires exactly once because @no-loop prevents self-re-activation.
+declare Score
+  value: int
+end
+
+@no-loop
+rule "cap score"
+  when
+    $s: Score(value > 90)
+  then
+    counter[0] += 1
+    insert(Score(value=95))
+    retract($s)
+end

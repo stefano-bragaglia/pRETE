@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.0] — 2026-06-21
+
+**Extending API change — PRL extra features.**
+
+### Added
+- `extends` keyword in `declare` blocks — type inheritance via Python MRO;
+  parent-type patterns fire for child-type facts via `isinstance`.
+- `@key` field tag — generates identity-aware `__eq__` / `__hash__` on declared
+  types using only the annotated key fields.
+- Positional and named constraint shorthand — `TypeName(v1, v2)` and
+  `TypeName(field=v)` in patterns, resolved against declaration order at
+  compile time.
+- `@no-loop` rule tag — alias for the existing `no-loop: true` attribute;
+  prevents a rule from re-activating on its own WM modifications.
+- `import` / `from … import` / `from … import … as` — self-contained `.prl`
+  files that declare their own type dependencies; `types` dict in `load_prl`
+  becomes optional.
+- `or` disjunction — single PRL rule with K LHS branches compiles to K
+  `Production` objects sharing the same RHS closure.
+- `forall(P, Q)` — universal quantification, rewritten by the compiler to
+  `NccGroup([P, negated_Q])`.
+- `exists Pattern(…)` — new `ExistsNode` in `beta.py`; fires once per
+  matching left context regardless of right-fact count.
+- `@role(event)`, `@timestamp`, `@duration`, `@expires` — synchronous
+  logical-clock CEP model; events are auto-retracted when
+  `timestamp + expires < logical_clock`.
+- `accumulate(inner; $result: fn; constraint)` — new `AccumulateNode` in
+  `beta.py` with incremental per-left-token state for `sum`, `count`, `min`,
+  `max`, `collectList`.
+- New example `.prl` files and companion Python drivers for all extra features
+  (`src/examples/prl/inheritance.prl`, `identity_key.prl`,
+  `compact_patterns.prl`, `self_modify.prl`, `imported_types.prl`,
+  `disjunction.prl`, `universal.prl`, `existence_check.prl`,
+  `event_stream.prl`, `aggregation.prl`).
+
+### Changed
+- `src/rete/prl_ast.py` — `DeclareDecl` gains `extends` and `tags` fields;
+  `FieldDecl` and `RuleDecl` gain `tags`; new AST nodes: `Tag`, `ImportDecl`,
+  `OrGroup`, `ForallNode`, `AccumulateNode` (AST).
+- `src/rete/prl_lexer.py` — new keywords: `extends`, `import`, `from`, `as`,
+  `or`, `forall`, `exists`, `accumulate`; new `AT` token type.
+- `src/rete/prl_parser.py` — tag parsing, `extends`, all import forms,
+  `or` / `forall` / `exists` / `accumulate` conditions.
+- `src/rete/prl.py` — compiler handles all new AST nodes; topological sort
+  for `extends`; `__prl_meta__` dict on generated types for tag semantics.
+- `src/rete/beta.py` — `ExistsNode`, `AccumulateNode`.
+- `src/rete/condition.py` — `Pattern.exists`, `AccumulateSpec`.
+- `src/rete/network.py` — wires `ExistsNode` / `AccumulateNode`.
+- `src/rete/fact.py` — `Fact.timestamp` field for CEP.
+- `src/rete/engine.py` — `logical_clock`, `advance_clock()`, `_expire_events()`.
+
+---
+
 ## [2.1.0] — 2026-06-20
 
 **Extending API change — pRETE Rule Language (PRL) parser added.**

@@ -9,12 +9,18 @@ from __future__ import annotations
 import pytest
 
 from rete.prl_ast import (
+    AccumulateExpr,
     BindConstraint,
     CompareConstraint,
+    ForallNode,
+    NamedConstraint,
     NccPatternGroup,
+    OrGroup,
     PatternNode,
+    PositionalConstraint,
     ProgramNode,
     RuleDecl,
+    Tag,
 )
 from rete.prl_lexer import tokenize
 from rete.prl_parser import parse
@@ -102,6 +108,7 @@ class TestParseDeclare:
         dd = _parse("declare Marker\nend").declares[0]
         assert dd.name == "Marker"
         assert dd.fields == ()
+        assert dd.extends is None
 
     def test_one_field(self) -> None:
         fd = _parse("declare Temp\n  value: float\nend").declares[0].fields[0]
@@ -162,16 +169,23 @@ class TestParseRuleAttrs:
     def test_no_loop_does_not_change_salience(self) -> None:
         rd = _first_rule('rule "r"\n  no-loop\n  when\nthen\npass\nend')
         assert rd.salience == 0
+        assert rd.no_loop is True
 
     def test_no_loop_with_explicit_true(self) -> None:
         rd = _first_rule('rule "r"\n  no-loop true\n  when\nthen\npass\nend')
         assert rd.salience == 0
+        assert rd.no_loop is True
 
     def test_salience_and_no_loop_together(self) -> None:
         rd = _first_rule(
             'rule "r"\n  salience 5\n  no-loop\n  when\nthen\npass\nend'
         )
         assert rd.salience == 5
+        assert rd.no_loop is True
+
+    def test_no_loop_false_by_default(self) -> None:
+        rd = _first_rule('rule "r" when\nthen\npass\nend')
+        assert rd.no_loop is False
 
 
 # ===========================================================================
@@ -359,6 +373,35 @@ class TestParseConstraints:
 # Error cases
 # ===========================================================================
 
+# ===========================================================================
+# extends
+# ===========================================================================
+
+class TestParseDeclareExtends:
+    """``extends`` clause in declare blocks is parsed into ``DeclareDecl.extends``."""
+
+    def test_extends_sets_field(self) -> None:
+        dd = _parse("declare Dog extends Animal\nend").declares[0]
+        assert dd.extends == "Animal"
+
+    def test_extends_name_stored(self) -> None:
+        dd = _parse("declare Dog extends Animal\n  breed: str\nend").declares[0]
+        assert dd.name == "Dog"
+        assert dd.extends == "Animal"
+
+    def test_no_extends_is_none(self) -> None:
+        dd = _parse("declare Animal\n  name: str\nend").declares[0]
+        assert dd.extends is None
+
+    def test_extends_missing_parent_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse("declare Dog extends\nend")
+
+
+# ===========================================================================
+# Error cases
+# ===========================================================================
+
 class TestParseErrors:
     """Malformed PRL raises SyntaxError."""
 
@@ -369,3 +412,421 @@ class TestParseErrors:
     def test_unrecognised_top_level_token(self) -> None:
         with pytest.raises(SyntaxError):
             _parse("42")
+
+
+# ===========================================================================
+# Tag parsing (ES-2)
+# ===========================================================================
+
+class TestParseTags:
+    """Tags (``@name`` / ``@name(value)``) attach to declare, field, and rule nodes."""
+
+    def test_tag_no_value_on_declare(self) -> None:
+        dd = _parse("@timestamp\ndeclare E\nend").declares[0]
+        assert dd.tags == (Tag("timestamp"),)
+
+    def test_tag_with_value_on_declare(self) -> None:
+        dd = _parse("@role(event)\ndeclare E\nend").declares[0]
+        assert dd.tags == (Tag("role", "event"),)
+
+    def test_multiple_tags_on_declare(self) -> None:
+        dd = _parse("@role(event)\n@expires(30s)\ndeclare E\nend").declares[0]
+        assert dd.tags == (Tag("role", "event"), Tag("expires", "30s"))
+
+    def test_no_tags_gives_empty_tuple_on_declare(self) -> None:
+        dd = _parse("declare D\n  x: int\nend").declares[0]
+        assert dd.tags == ()
+
+    def test_field_tag_no_value(self) -> None:
+        fd = _parse("declare D\n  @key\n  id: int\nend").declares[0].fields[0]
+        assert fd.name == "id"
+        assert fd.tags == (Tag("key"),)
+
+    def test_field_tag_with_value(self) -> None:
+        fd = _parse("declare D\n  @custom(foo)\n  x: int\nend").declares[0].fields[0]
+        assert fd.tags == (Tag("custom", "foo"),)
+
+    def test_field_without_tag_has_empty_tags(self) -> None:
+        fd = _parse("declare D\n  x: int\nend").declares[0].fields[0]
+        assert fd.tags == ()
+
+    def test_multiple_fields_with_mixed_tags(self) -> None:
+        src = "declare D\n  @key\n  id: int\n  name: str\nend"
+        fields = _parse(src).declares[0].fields
+        assert fields[0].tags == (Tag("key"),)
+        assert fields[1].tags == ()
+
+    def test_no_loop_tag_on_rule_stored_in_tags(self) -> None:
+        rd = _first_rule('@no-loop\nrule "r" when\nthen\npass\nend')
+        assert Tag("no-loop") in rd.tags
+
+    def test_no_loop_tag_does_not_set_no_loop_field(self) -> None:
+        """Parser stores @no-loop in tags; the compiler sets Production.no_loop."""
+        rd = _first_rule('@no-loop\nrule "r" when\nthen\npass\nend')
+        assert rd.no_loop is False  # attribute form only; compiler combines both
+
+    def test_unknown_tag_stored_on_rule(self) -> None:
+        rd = _first_rule('@future_feature\nrule "r" when\nthen\npass\nend')
+        assert any(t.name == "future_feature" for t in rd.tags)
+
+    def test_no_loop_kw_tag_name_parsed(self) -> None:
+        """``@no-loop`` tag name is lexed as KW; parser must accept it."""
+        rd = _first_rule('@no-loop\nrule "r" when\nthen\npass\nend')
+        assert rd.tags[0].name == "no-loop"
+
+
+# ===========================================================================
+# Shorthand constraints (ES-4)
+# ===========================================================================
+
+class TestParseShorthandConstraints:
+    """Positional and named-keyword constraint forms."""
+
+    def test_positional_single_int(self) -> None:
+        c = _first_constraint("Point(0)")
+        assert isinstance(c, PositionalConstraint)
+        assert c.value == 0
+
+    def test_positional_two_values(self) -> None:
+        pat = _lhs_cond("Point(0, 0)")
+        assert len(pat.constraints) == 2
+        assert all(isinstance(c, PositionalConstraint) for c in pat.constraints)
+
+    def test_positional_string_value(self) -> None:
+        c = _first_constraint('Order("open")')
+        assert isinstance(c, PositionalConstraint)
+        assert c.value == "open"
+
+    def test_positional_variable_reference(self) -> None:
+        c = _first_constraint("Point($x)")
+        assert isinstance(c, PositionalConstraint)
+        assert c.value == "$x"
+
+    def test_named_single(self) -> None:
+        c = _first_constraint("Point(y=0)")
+        assert isinstance(c, NamedConstraint)
+        assert c.field == "y"
+        assert c.value == 0
+
+    def test_named_string_value(self) -> None:
+        c = _first_constraint('Order(status="open")')
+        assert isinstance(c, NamedConstraint)
+        assert c.value == "open"
+
+    def test_mixed_positional_and_named(self) -> None:
+        pat = _lhs_cond("Point(0, y=1)")
+        assert isinstance(pat.constraints[0], PositionalConstraint)
+        assert isinstance(pat.constraints[1], NamedConstraint)
+
+    def test_named_and_bind_coexist(self) -> None:
+        pat = _lhs_cond("Point($v: x, y=1)")
+        assert isinstance(pat.constraints[0], BindConstraint)
+        assert isinstance(pat.constraints[1], NamedConstraint)
+
+    def test_named_and_compare_coexist(self) -> None:
+        pat = _lhs_cond('Order(status="open", amount > 100)')
+        assert isinstance(pat.constraints[0], NamedConstraint)
+        assert isinstance(pat.constraints[1], CompareConstraint)
+
+    def test_positional_negative_number(self) -> None:
+        c = _first_constraint("Point(-1)")
+        assert isinstance(c, PositionalConstraint)
+        assert c.value == -1
+
+    def test_positional_bool(self) -> None:
+        c = _first_constraint("Flag(true)")
+        assert isinstance(c, PositionalConstraint)
+        assert c.value is True
+
+
+# ===========================================================================
+# Import declarations (ES-5)
+# ===========================================================================
+
+class TestParseImport:
+    """``import`` and ``from … import`` at the top level."""
+
+    def test_import_class(self) -> None:
+        prog = _parse("import rete.fact.Fact")
+        assert len(prog.imports) == 1
+        assert prog.imports[0].names == (("rete.fact.Fact", "Fact"),)
+
+    def test_import_class_with_alias(self) -> None:
+        prog = _parse("import rete.fact.Fact as F")
+        assert prog.imports[0].names == (("rete.fact.Fact", "F"),)
+
+    def test_from_import_single(self) -> None:
+        prog = _parse("from rete.fact import Fact")
+        assert prog.imports[0].names == (("rete.fact.Fact", "Fact"),)
+
+    def test_from_import_with_alias(self) -> None:
+        prog = _parse("from rete.fact import Fact as F")
+        assert prog.imports[0].names == (("rete.fact.Fact", "F"),)
+
+    def test_from_import_multiple(self) -> None:
+        prog = _parse("from rete.fact import Fact, Token")
+        assert prog.imports[0].names == (
+            ("rete.fact.Fact", "Fact"),
+            ("rete.fact.Token", "Token"),
+        )
+
+    def test_from_import_multiple_with_aliases(self) -> None:
+        prog = _parse("from rete.fact import Fact as F, Token as T")
+        assert prog.imports[0].names == (
+            ("rete.fact.Fact", "F"),
+            ("rete.fact.Token", "T"),
+        )
+
+    def test_import_before_declare(self) -> None:
+        src = "import rete.fact.Fact\ndeclare Marker\nend"
+        prog = _parse(src)
+        assert len(prog.imports) == 1
+        assert len(prog.declares) == 1
+
+    def test_no_imports_gives_empty_tuple(self) -> None:
+        prog = _parse("declare Marker\nend")
+        assert prog.imports == ()
+
+    def test_multiple_import_stmts(self) -> None:
+        src = "import rete.fact.Fact\nfrom rete.fact import Token"
+        prog = _parse(src)
+        assert len(prog.imports) == 2
+
+
+# ===========================================================================
+# or disjunction (ES-6)
+# ===========================================================================
+
+class TestParseOr:
+    """``or`` keyword splits the LHS into an ``OrGroup``."""
+
+    def test_two_branch_or_yields_or_group(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        og = _parse(src).rules[0].lhs[0]
+        assert isinstance(og, OrGroup)
+
+    def test_two_branch_or_branch_count(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        og = _parse(src).rules[0].lhs[0]
+        assert len(og.branches) == 2
+
+    def test_two_branch_or_type_names(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        og = _parse(src).rules[0].lhs[0]
+        assert og.branches[0][0].type_name == "A"
+        assert og.branches[1][0].type_name == "B"
+
+    def test_three_branch_or(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B() or\n  C()\nthen\nend'
+        prog = _parse(src)
+        og = prog.rules[0].lhs[0]
+        assert isinstance(og, OrGroup)
+        assert len(og.branches) == 3
+
+    def test_multi_condition_branch(self) -> None:
+        """Each branch may contain multiple conditions."""
+        src = 'rule "r"\nwhen\n  A()\n  B() or\n  C()\nthen\nend'
+        prog = _parse(src)
+        og = prog.rules[0].lhs[0]
+        assert isinstance(og, OrGroup)
+        assert len(og.branches[0]) == 2
+        assert len(og.branches[1]) == 1
+
+    def test_no_or_gives_flat_tuple(self) -> None:
+        src = 'rule "r"\nwhen\n  A()\nthen\nend'
+        prog = _parse(src)
+        lhs = prog.rules[0].lhs
+        assert not any(isinstance(n, OrGroup) for n in lhs)
+        assert lhs[0].type_name == "A"
+
+    def test_or_with_fact_binding(self) -> None:
+        src = 'rule "r"\nwhen\n  $x: A() or\n  $x: B()\nthen\nend'
+        prog = _parse(src)
+        og = prog.rules[0].lhs[0]
+        assert og.branches[0][0].fact_var == "$x"
+        assert og.branches[1][0].fact_var == "$x"
+
+    def test_or_with_constraints(self) -> None:
+        src = 'rule "r"\nwhen\n  A(x == 1) or\n  B(y == 2)\nthen\nend'
+        prog = _parse(src)
+        og = prog.rules[0].lhs[0]
+        assert isinstance(og, OrGroup)
+        assert len(og.branches[0][0].constraints) == 1
+
+    def test_or_branches_are_tuples(self) -> None:
+        src = 'rule "r"\nwhen\n  A() or\n  B()\nthen\nend'
+        og = _parse(src).rules[0].lhs[0]
+        assert isinstance(og.branches, tuple)
+        assert all(isinstance(b, tuple) for b in og.branches)
+
+
+# ===========================================================================
+# forall (ES-6)
+# ===========================================================================
+
+class TestParseForall:
+    """``forall(P, Q)`` produces a ``ForallNode``."""
+
+    def test_basic_forall(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        prog = _parse(src)
+        assert len(prog.rules[0].lhs) == 1
+        fn = prog.rules[0].lhs[0]
+        assert isinstance(fn, ForallNode)
+        assert fn.pattern.type_name == "Order"
+        assert fn.condition.type_name == "Approval"
+
+    def test_forall_with_constraint_on_P(self) -> None:
+        src = (
+            'rule "r"\nwhen\n'
+            '  forall(\n'
+            '    Order(status == "pending"),\n'
+            '    Approval()\n'
+            '  )\nthen\nend'
+        )
+        prog = _parse(src)
+        fn = prog.rules[0].lhs[0]
+        assert isinstance(fn, ForallNode)
+        c = fn.pattern.constraints[0]
+        assert isinstance(c, CompareConstraint)
+        assert c.op == "=="
+
+    def test_forall_with_fact_binding_in_P(self) -> None:
+        src = 'rule "r"\nwhen\n  forall($o: Order(), Approval())\nthen\nend'
+        prog = _parse(src)
+        fn = prog.rules[0].lhs[0]
+        assert fn.pattern.fact_var == "$o"
+
+    def test_forall_condition_has_no_fact_var_by_default(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        prog = _parse(src)
+        fn = prog.rules[0].lhs[0]
+        assert fn.condition.fact_var is None
+
+    def test_missing_comma_raises(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order() Approval())\nthen\nend'
+        with pytest.raises(SyntaxError):
+            _parse(src)
+
+    def test_forall_is_single_lhs_node(self) -> None:
+        src = 'rule "r"\nwhen\n  forall(Order(), Approval())\nthen\nend'
+        lhs = _parse(src).rules[0].lhs
+        assert len(lhs) == 1
+        assert isinstance(lhs[0], ForallNode)
+
+
+# ===========================================================================
+# exists (ES-7)
+# ===========================================================================
+
+
+class TestParseExists:
+    """``exists Pattern(…)`` sets ``exists=True`` on the PatternNode."""
+
+    def test_exists_traditional(self) -> None:
+        src = 'rule "r"\nwhen\n  exists Invoice()\nthen\nend'
+        pat = _parse(src).rules[0].lhs[0]
+        assert isinstance(pat, PatternNode)
+        assert pat.exists is True
+        assert pat.negated is False
+
+    def test_exists_with_constraint(self) -> None:
+        src = 'rule "r"\nwhen\n  exists Invoice(overdue == true)\nthen\nend'
+        pat = _parse(src).rules[0].lhs[0]
+        assert pat.exists is True
+        assert len(pat.constraints) == 1
+
+    def test_exists_with_join_constraint(self) -> None:
+        src = (
+            'rule "r"\nwhen\n'
+            '  $acc: Account()\n'
+            '  exists Invoice(accountId == $acc)\n'
+            'then\nend'
+        )
+        exists_pat = _parse(src).rules[0].lhs[1]
+        assert isinstance(exists_pat, PatternNode)
+        assert exists_pat.exists is True
+
+    def test_exists_no_fact_var(self) -> None:
+        src = 'rule "r"\nwhen\n  exists Invoice()\nthen\nend'
+        assert _parse(src).rules[0].lhs[0].fact_var is None
+
+    def test_exists_fact_var_raises(self) -> None:
+        src = 'rule "r"\nwhen\n  $inv: exists Invoice()\nthen\nend'
+        with pytest.raises((SyntaxError, Exception)):
+            _parse(src)
+
+    def test_exists_is_single_lhs_node(self) -> None:
+        src = (
+            'rule "r"\nwhen\n'
+            '  $acc: Account()\n'
+            '  exists Invoice()\n'
+            'then\nend'
+        )
+        lhs = _parse(src).rules[0].lhs
+        assert len(lhs) == 2
+        assert isinstance(lhs[1], PatternNode)
+        assert lhs[1].exists is True
+
+
+# ===========================================================================
+# Accumulate
+# ===========================================================================
+
+
+def _acc_src(
+    inner="Order($amount: amount)", result="$total: sum($amount)", constraint=""
+):
+    body = f"  accumulate(\n    {inner};\n    {result}"
+    if constraint:
+        body += f";\n    {constraint}"
+    body += "\n  )"
+    return f'rule "r"\nwhen\n{body}\nthen\nend'
+
+
+class TestAccumulateParser:
+    def test_sum_parsed(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        assert isinstance(node, AccumulateExpr)
+        assert node.function == "sum"
+        assert node.result_var == "$total"
+        assert node.bind_var == "$amount"
+
+    def test_count_no_bind_var(self) -> None:
+        node = _parse(_acc_src(result="$n: count()")).rules[0].lhs[0]
+        assert isinstance(node, AccumulateExpr)
+        assert node.function == "count"
+        assert node.bind_var is None
+
+    def test_constraint_none_when_absent(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        assert node.constraint is None
+
+    def test_constraint_parsed(self) -> None:
+        node = _parse(_acc_src(constraint="$total > 1000")).rules[0].lhs[0]
+        assert isinstance(node.constraint, CompareConstraint)
+        assert node.constraint.op == ">"
+        assert node.constraint.rhs == 1000
+
+    def test_result_var_preserved(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        assert node.result_var == "$total"
+
+    def test_inner_pattern_is_pattern_node(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        assert isinstance(node.inner, PatternNode)
+        assert node.inner.type_name == "Order"
+
+    def test_inner_pattern_bindings(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        binds = [c for c in node.inner.constraints if isinstance(c, BindConstraint)]
+        assert any(b.var == "$amount" and b.field == "amount" for b in binds)
+
+    def test_min_function(self) -> None:
+        node = _parse(_acc_src(result="$m: min($amount)")).rules[0].lhs[0]
+        assert node.function == "min"
+
+    def test_accumulate_is_single_lhs_node(self) -> None:
+        lhs = _parse(_acc_src()).rules[0].lhs
+        assert len(lhs) == 1
+        assert isinstance(lhs[0], AccumulateExpr)

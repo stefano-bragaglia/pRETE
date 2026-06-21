@@ -1,0 +1,14 @@
+// ES-3: @key — generated Customer class uses id-only equality/hash.
+declare Customer
+  @key
+  id: str
+  name: str
+  tier: str
+end
+
+rule "flag gold customer"
+  when
+    Customer(tier == "gold")
+  then
+    results.append(1)
+end

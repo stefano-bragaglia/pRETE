@@ -1,0 +1,35 @@
+// Doorenbos §2.3 — two productions with logically shared C1/C2.
+// P1 tests z is red → x=B1, y=B2, z=B3
+// P2 tests y is red → x=B1, y=B3, z=B4
+declare On
+  upper: str
+  lower: str
+end
+
+declare LeftOf
+  left: str
+  right: str
+end
+
+declare Color
+  block: str
+  color: str
+end
+
+rule "find-stack-left-of-red-z"
+  when
+    On($x: upper, $y: lower)
+    LeftOf(left == $y, $z: right)
+    Color(block == $z, color == "red")
+  then
+    results.append((x, y, z))
+end
+
+rule "find-stack-left-of-red-y"
+  when
+    On($x: upper, $y: lower)
+    LeftOf(left == $y, $z: right)
+    Color(block == $y, color == "red")
+  then
+    results.append((x, y, z))
+end

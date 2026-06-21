@@ -1,0 +1,16 @@
+// ES-8: CEP — stock tick event expires after 30 s of logical clock time.
+@role(event)
+@expires(30s)
+declare StockTick
+  @timestamp
+  ts: float
+  symbol: str
+  price: float
+end
+
+rule "price spike"
+  when
+    StockTick($symbol: symbol, price > 100.0)
+  then
+    alerts.append(symbol)
+end

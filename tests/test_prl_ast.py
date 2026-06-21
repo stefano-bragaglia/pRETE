@@ -12,11 +12,50 @@ from rete.prl_ast import (
     CompareConstraint,
     DeclareDecl,
     FieldDecl,
+    ForallNode,
+    ImportDecl,
+    NamedConstraint,
     NccPatternGroup,
+    OrGroup,
     PatternNode,
+    PositionalConstraint,
     ProgramNode,
     RuleDecl,
+    Tag,
 )
+
+
+# ===========================================================================
+# Tag (ES-2)
+# ===========================================================================
+
+class TestTag:
+    """``Tag`` is a frozen dataclass representing one ``@name`` / ``@name(value)``."""
+
+    def test_construction_no_value(self) -> None:
+        tag = Tag("key")
+        assert tag.name == "key"
+        assert tag.value is None
+
+    def test_construction_with_value(self) -> None:
+        tag = Tag("role", "event")
+        assert tag.name == "role"
+        assert tag.value == "event"
+
+    def test_frozen(self) -> None:
+        tag = Tag("key")
+        with pytest.raises(AttributeError):
+            tag.name = "other"  # type: ignore[misc]
+
+    def test_structural_equality(self) -> None:
+        assert Tag("key") == Tag("key")
+        assert Tag("role", "event") == Tag("role", "event")
+        assert Tag("key") != Tag("role")
+        assert Tag("role", "event") != Tag("role", "fact")
+
+    def test_hashable(self) -> None:
+        assert hash(Tag("key")) == hash(Tag("key"))
+        assert hash(Tag("role", "event")) == hash(Tag("role", "event"))
 
 
 # ===========================================================================
@@ -30,6 +69,14 @@ class TestFieldDecl:
         fd = FieldDecl("value", "float")
         assert fd.name == "value"
         assert fd.type_name == "float"
+
+    def test_tags_default_empty(self) -> None:
+        fd = FieldDecl("value", "float")
+        assert fd.tags == ()
+
+    def test_construction_with_tags(self) -> None:
+        fd = FieldDecl("id", "int", tags=(Tag("key"),))
+        assert fd.tags == (Tag("key"),)
 
     def test_frozen(self) -> None:
         fd = FieldDecl("name", "str")
@@ -57,6 +104,14 @@ class TestDeclareDecl:
         assert dd.name == "Marker"
         assert dd.fields == ()
 
+    def test_tags_default_empty(self) -> None:
+        dd = DeclareDecl("Marker", ())
+        assert dd.tags == ()
+
+    def test_construction_with_tags(self) -> None:
+        dd = DeclareDecl("E", (), tags=(Tag("role", "event"),))
+        assert dd.tags == (Tag("role", "event"),)
+
     def test_construction_with_fields(self) -> None:
         fields = (FieldDecl("value", "float"),)
         dd = DeclareDecl("Temp", fields)
@@ -71,6 +126,86 @@ class TestDeclareDecl:
         fields = (FieldDecl("v", "int"),)
         assert DeclareDecl("T", fields) == DeclareDecl("T", fields)
         assert DeclareDecl("T", fields) != DeclareDecl("X", fields)
+
+
+# ===========================================================================
+# PositionalConstraint (ES-4)
+# ===========================================================================
+
+class TestPositionalConstraint:
+    """``PositionalConstraint`` is a frozen dataclass holding a bare value."""
+
+    def test_construction_int(self) -> None:
+        pc = PositionalConstraint(42)
+        assert pc.value == 42
+
+    def test_construction_none(self) -> None:
+        assert PositionalConstraint(None).value is None
+
+    def test_frozen(self) -> None:
+        with pytest.raises(AttributeError):
+            PositionalConstraint(1).value = 2  # type: ignore[misc]
+
+    def test_structural_equality(self) -> None:
+        assert PositionalConstraint(1) == PositionalConstraint(1)
+        assert PositionalConstraint(1) != PositionalConstraint(2)
+
+    def test_hashable(self) -> None:
+        assert hash(PositionalConstraint(1)) == hash(PositionalConstraint(1))
+
+
+# ===========================================================================
+# NamedConstraint (ES-4)
+# ===========================================================================
+
+class TestNamedConstraint:
+    """``NamedConstraint`` is a frozen dataclass for ``field=value`` syntax."""
+
+    def test_construction(self) -> None:
+        nc = NamedConstraint("status", "open")
+        assert nc.field == "status"
+        assert nc.value == "open"
+
+    def test_frozen(self) -> None:
+        with pytest.raises(AttributeError):
+            NamedConstraint("f", 1).field = "g"  # type: ignore[misc]
+
+    def test_structural_equality(self) -> None:
+        assert NamedConstraint("f", 1) == NamedConstraint("f", 1)
+        assert NamedConstraint("f", 1) != NamedConstraint("g", 1)
+
+    def test_hashable(self) -> None:
+        assert hash(NamedConstraint("f", 1)) == hash(NamedConstraint("f", 1))
+
+
+# ===========================================================================
+# ImportDecl (ES-5)
+# ===========================================================================
+
+class TestImportDecl:
+    """``ImportDecl`` is a frozen dataclass of ``(qualified, alias)`` pairs."""
+
+    def test_single_name(self) -> None:
+        d = ImportDecl((("rete.fact.Fact", "Fact"),))
+        assert d.names == (("rete.fact.Fact", "Fact"),)
+
+    def test_multiple_names(self) -> None:
+        d = ImportDecl((("a.B", "B"), ("a.C", "MyC")))
+        assert len(d.names) == 2
+
+    def test_frozen(self) -> None:
+        d = ImportDecl((("a.B", "B"),))
+        with pytest.raises(AttributeError):
+            d.names = ()  # type: ignore[misc]
+
+    def test_structural_equality(self) -> None:
+        a = ImportDecl((("a.B", "B"),))
+        assert a == ImportDecl((("a.B", "B"),))
+        assert a != ImportDecl((("a.C", "C"),))
+
+    def test_hashable(self) -> None:
+        d = ImportDecl((("a.B", "B"),))
+        assert hash(d) == hash(ImportDecl((("a.B", "B"),)))
 
 
 # ===========================================================================
@@ -220,13 +355,29 @@ class TestNccPatternGroup:
 # ===========================================================================
 
 class TestRuleDecl:
-    """``RuleDecl`` has three optional fields with sensible defaults."""
+    """``RuleDecl`` has optional fields with sensible defaults."""
 
     def test_defaults(self) -> None:
         rd = RuleDecl("my-rule")
         assert rd.salience == 0
         assert rd.lhs == ()
         assert rd.rhs_src == ""
+
+    def test_no_loop_default_false(self) -> None:
+        rd = RuleDecl("r")
+        assert rd.no_loop is False
+
+    def test_no_loop_explicit_true(self) -> None:
+        rd = RuleDecl("r", no_loop=True)
+        assert rd.no_loop is True
+
+    def test_tags_default_empty(self) -> None:
+        rd = RuleDecl("r")
+        assert rd.tags == ()
+
+    def test_tags_explicit(self) -> None:
+        rd = RuleDecl("r", tags=(Tag("no-loop"),))
+        assert rd.tags == (Tag("no-loop"),)
 
     def test_explicit_salience(self) -> None:
         rd = RuleDecl("r", salience=10)
@@ -249,6 +400,7 @@ class TestRuleDecl:
     def test_structural_equality(self) -> None:
         assert RuleDecl("r") == RuleDecl("r")
         assert RuleDecl("r") != RuleDecl("r", salience=5)
+        assert RuleDecl("r") != RuleDecl("r", no_loop=True)
 
 
 # ===========================================================================
@@ -278,7 +430,88 @@ class TestProgramNode:
         with pytest.raises(AttributeError):
             pn.declares = (DeclareDecl("X", ()),)  # type: ignore[misc]
 
+    def test_imports_default_empty(self) -> None:
+        pn = ProgramNode((), ())
+        assert pn.imports == ()
+
+    def test_with_import(self) -> None:
+        imp = ImportDecl((("a.B", "B"),))
+        pn = ProgramNode((), (), imports=(imp,))
+        assert len(pn.imports) == 1
+
     def test_structural_equality(self) -> None:
         assert ProgramNode((), ()) == ProgramNode((), ())
         rd = RuleDecl("r")
         assert ProgramNode((), (rd,)) != ProgramNode((), ())
+
+
+# ===========================================================================
+# OrGroup (ES-6)
+# ===========================================================================
+
+class TestOrGroup:
+    """``OrGroup`` is a frozen dataclass of branch tuples."""
+
+    def test_construction(self) -> None:
+        b0 = (PatternNode("A", None, (), False),)
+        b1 = (PatternNode("B", None, (), False),)
+        og = OrGroup((b0, b1))
+        assert len(og.branches) == 2
+
+    def test_branch_content(self) -> None:
+        b = (PatternNode("A", None, (), False),)
+        og = OrGroup((b, b))
+        assert og.branches[0][0].type_name == "A"
+
+    def test_frozen(self) -> None:
+        og = OrGroup(())
+        with pytest.raises(AttributeError):
+            og.branches = ()  # type: ignore[misc]
+
+    def test_equality(self) -> None:
+        b = (PatternNode("A", None, (), False),)
+        assert OrGroup((b, b)) == OrGroup((b, b))
+        assert OrGroup((b, b)) != OrGroup((b,))
+
+    def test_hashable(self) -> None:
+        b = (PatternNode("A", None, (), False),)
+        assert hash(OrGroup((b, b))) == hash(OrGroup((b, b)))
+
+
+# ===========================================================================
+# ForallNode (ES-6)
+# ===========================================================================
+
+class TestForallNode:
+    """``ForallNode`` is a frozen dataclass with two PatternNode fields."""
+
+    def test_construction(self) -> None:
+        p = PatternNode("Order", None, (), False)
+        q = PatternNode("Approval", None, (), False)
+        fn = ForallNode(p, q)
+        assert fn.pattern is p
+        assert fn.condition is q
+
+    def test_pattern_and_condition_stored(self) -> None:
+        p = PatternNode("P", None, (), False)
+        q = PatternNode("Q", None, (), False)
+        fn = ForallNode(p, q)
+        assert fn.pattern.type_name == "P"
+        assert fn.condition.type_name == "Q"
+
+    def test_frozen(self) -> None:
+        p = PatternNode("A", None, (), False)
+        fn = ForallNode(p, p)
+        with pytest.raises(AttributeError):
+            fn.pattern = p  # type: ignore[misc]
+
+    def test_equality(self) -> None:
+        p = PatternNode("A", None, (), False)
+        q = PatternNode("B", None, (), False)
+        assert ForallNode(p, q) == ForallNode(p, q)
+        assert ForallNode(p, q) != ForallNode(q, p)
+
+    def test_hashable(self) -> None:
+        p = PatternNode("A", None, (), False)
+        q = PatternNode("B", None, (), False)
+        assert hash(ForallNode(p, q)) == hash(ForallNode(p, q))

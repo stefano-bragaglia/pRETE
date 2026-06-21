@@ -1,0 +1,30 @@
+// Transitive ancestor inference via forward chaining.
+// known is an injected set[tuple[str,str]] used as dedup guard.
+declare Parent
+  parent: str
+  child: str
+end
+
+declare Ancestor
+  ancestor: str
+  descendant: str
+end
+
+rule "direct"
+  when
+    Parent($p: parent, $c: child)
+  then
+    if (p, c) not in known:
+        known.add((p, c))
+        insert(Ancestor(p, c))
+end
+
+rule "transitive"
+  when
+    Parent($p: parent, $c: child)
+    Ancestor(ancestor == $c, $d: descendant)
+  then
+    if (p, d) not in known:
+        known.add((p, d))
+        insert(Ancestor(p, d))
+end

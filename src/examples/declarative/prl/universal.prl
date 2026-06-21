@@ -1,0 +1,19 @@
+// ES-6: forall — rule fires only when all pending orders have an approval.
+declare Order
+  id: str
+  status: str
+end
+
+declare Approval
+  order_id: str
+end
+
+rule "all approved"
+  when
+    forall(
+      Order(status == "pending", $id: id),
+      Approval(order_id == $id)
+    )
+  then
+    results.append("batch_ready")
+end

@@ -1,0 +1,17 @@
+// ES-7: exists — rule fires once per Account regardless of Invoice count.
+declare Account
+  id: str
+end
+
+declare Invoice
+  account_id: str
+  overdue: bool
+end
+
+rule "overdue alert"
+  when
+    Account($id: id)
+    exists Invoice(account_id == $id, overdue == true)
+  then
+    alerts.append(id)
+end

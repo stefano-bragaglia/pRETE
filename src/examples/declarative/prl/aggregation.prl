@@ -1,0 +1,16 @@
+// ES-9: accumulate — flag when total spend exceeds threshold; un-fires on retract.
+declare Order
+  customer_id: str
+  amount: float
+end
+
+rule "flag high spend"
+  when
+    accumulate(
+      Order($amount: amount);
+      $total: sum($amount);
+      $total > 1000
+    )
+  then
+    results.append($total)
+end

@@ -331,3 +331,111 @@ def test_token_bindings_accessible_in_rhs():
     engine.add_fact(Fact(Color("b1", "red")))
     engine.run()
     assert captured == ["red"]
+
+
+# ---------------------------------------------------------------------------
+# CEP — logical clock and event expiry
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Reading:
+    sensor: str
+    ts: float
+
+
+_READING_META = {
+    "role": "event",
+    "timestamp_field": "ts",
+    "duration_field": None,
+    "expires_delta": 30.0,
+}
+
+
+@dataclass
+class _Plain:
+    value: int
+
+
+class TestCep:
+    def setup_method(self):
+        _Reading.__prl_meta__ = _READING_META
+
+    def teardown_method(self):
+        if hasattr(_Reading, "__prl_meta__"):
+            del _Reading.__prl_meta__
+
+    def test_advance_clock_sets_logical_clock(self):
+        engine = InferenceEngine()
+        engine.advance_clock(42.0)
+        assert engine.logical_clock == 42.0
+
+    def test_advance_clock_is_absolute(self):
+        engine = InferenceEngine()
+        engine.advance_clock(10.0)
+        engine.advance_clock(5.0)
+        assert engine.logical_clock == 5.0
+
+    def test_add_fact_stamps_timestamp(self):
+        engine = InferenceEngine()
+        f = Fact(_Reading("s1", 100.0))
+        engine.add_fact(f)
+        assert f.timestamp == 100.0
+
+    def test_add_fact_no_meta_no_stamp(self):
+        engine = InferenceEngine()
+        f = Fact(_Plain(1))
+        engine.add_fact(f)
+        assert f.timestamp is None
+
+    def test_expire_events_removes_stale(self):
+        engine = InferenceEngine()
+        engine.add_production(Production(lhs=[Pattern(_Reading)], rhs=lambda t: None))
+        f = Fact(_Reading("s1", 0.0))
+        engine.add_fact(f)
+        engine.advance_clock(31.0)
+        engine.run()
+        assert f not in engine.network.root._facts
+
+    def test_expire_events_keeps_fresh(self):
+        engine = InferenceEngine()
+        engine.add_production(Production(lhs=[Pattern(_Reading)], rhs=lambda t: None))
+        f = Fact(_Reading("s1", 0.0))
+        engine.add_fact(f)
+        engine.advance_clock(29.0)
+        engine.run()
+        assert f in engine.network.root._facts
+
+    def test_non_event_fact_never_expires(self):
+        engine = InferenceEngine()
+        engine.add_production(Production(lhs=[Pattern(_Plain)], rhs=lambda t: None))
+        f = Fact(_Plain(1))
+        engine.add_fact(f)
+        engine.advance_clock(9999.0)
+        engine.run()
+        assert f in engine.network.root._facts
+
+    def test_expiry_triggers_negative_rules(self):
+        engine = InferenceEngine()
+        fired = []
+        engine.add_production(Production(
+            lhs=[Pattern(_Reading, negated=True)],
+            rhs=lambda t: fired.append(1),
+        ))
+        f = Fact(_Reading("s1", 0.0))
+        engine.add_fact(f)
+        engine.advance_clock(31.0)
+        engine.run()
+        assert fired  # negated rule fires after expiry removes the event
+
+    def test_expire_multiple_stale(self):
+        engine = InferenceEngine()
+        engine.add_production(Production(lhs=[Pattern(_Reading)], rhs=lambda t: None))
+        f1 = Fact(_Reading("s1", 0.0))
+        f2 = Fact(_Reading("s2", 5.0))
+        engine.add_fact(f1)
+        engine.add_fact(f2)
+        engine.advance_clock(40.0)
+        engine.run()
+        assert f1 not in engine.network.root._facts
+        assert f2 not in engine.network.root._facts

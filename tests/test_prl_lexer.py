@@ -160,6 +160,23 @@ class TestOperators:
 
 
 # ===========================================================================
+# Assignment operator (ES-4)
+# ===========================================================================
+
+class TestAssignToken:
+    """Single ``=`` is ``OP("=")``, distinct from ``OP("==")``.``"""
+
+    def test_single_eq_is_op(self) -> None:
+        assert _kv("=") == [("OP", "=")]
+
+    def test_double_eq_not_split(self) -> None:
+        assert _kv("==") == [("OP", "==")]
+
+    def test_named_form_tokens(self) -> None:
+        assert _kv("x=1") == [("IDENT", "x"), ("OP", "="), ("INT", "1")]
+
+
+# ===========================================================================
 # Punctuation
 # ===========================================================================
 
@@ -373,3 +390,94 @@ class TestMultiRule:
         rawblocks = _rawblocks(tokenize(src))
         assert "x = 1" in rawblocks[0].value
         assert "y = 2" in rawblocks[1].value
+
+
+# ===========================================================================
+# AT token (ES-2)
+# ===========================================================================
+
+class TestAtToken:
+    """``@`` emits a dedicated AT token; tag-name tokens follow immediately."""
+
+    def test_at_emits_at_token(self) -> None:
+        toks = tokenize("@key")
+        assert toks[0] == Tok("AT", "@", 1)
+
+    def test_at_followed_by_ident(self) -> None:
+        toks = tokenize("@key")
+        assert toks[1] == Tok("IDENT", "key", 1)
+
+    def test_at_followed_by_kw_noloop(self) -> None:
+        """``@no-loop`` — tag name is KW, not IDENT."""
+        toks = tokenize("@no-loop")
+        assert toks[0] == Tok("AT", "@", 1)
+        assert toks[1] == Tok("KW", "no-loop", 1)
+
+    def test_at_with_value_parens(self) -> None:
+        kv = _kv("@role(event)")
+        assert kv == [
+            ("AT", "@"), ("IDENT", "role"), ("PUNCT", "("),
+            ("IDENT", "event"), ("PUNCT", ")"),
+        ]
+
+    def test_multiple_tags_produce_multiple_at_tokens(self) -> None:
+        toks = tokenize("@role(event)\n@key")
+        at_toks = [t for t in toks if t.kind == "AT"]
+        assert len(at_toks) == 2
+
+    def test_at_not_in_rawblock(self) -> None:
+        """``@`` inside a then-block is raw-captured, not emitted as AT."""
+        toks = tokenize("then\n  @decorator\nend")
+        at_toks = [t for t in toks if t.kind == "AT"]
+        assert at_toks == []
+
+
+# ===========================================================================
+# Import keywords (ES-5)
+# ===========================================================================
+
+class TestImportKeywords:
+    """``import``, ``from``, and ``as`` are reserved keywords."""
+
+    def test_import_is_kw(self) -> None:
+        assert _kv("import") == [("KW", "import")]
+
+    def test_from_is_kw(self) -> None:
+        assert _kv("from") == [("KW", "from")]
+
+    def test_as_is_kw(self) -> None:
+        assert _kv("as") == [("KW", "as")]
+
+    def test_import_in_rawblock_not_kw(self) -> None:
+        """``import`` inside a then-block is raw-captured, not a KW token."""
+        toks = tokenize("then\n  import os\nend")
+        kw_toks = [t for t in toks if t.kind == "KW" and t.value == "import"]
+        assert kw_toks == []
+
+
+# ===========================================================================
+# or / forall keywords (ES-6)
+# ===========================================================================
+
+class TestOrForallKeywords:
+    """``or`` and ``forall`` are reserved keywords."""
+
+    def test_or_is_kw(self) -> None:
+        assert _kv("or") == [("KW", "or")]
+
+    def test_forall_is_kw(self) -> None:
+        assert _kv("forall") == [("KW", "forall")]
+
+    def test_or_in_rawblock_not_tokenised(self) -> None:
+        """``or`` inside a then-block is raw-captured, not a KW token."""
+        toks = tokenize("then\n  x = a or b\nend")
+        assert not any(t.kind == "KW" and t.value == "or" for t in toks)
+
+    def test_forall_in_rawblock_not_tokenised(self) -> None:
+        """``forall`` inside a then-block is raw-captured, not a KW token."""
+        toks = tokenize("then\n  forall(x)\nend")
+        assert not any(t.kind == "KW" and t.value == "forall" for t in toks)
+
+    def test_or_ident_not_mangled(self) -> None:
+        """``orange`` is still IDENT, not confused with ``or``."""
+        assert _kv("orange") == [("IDENT", "orange")]

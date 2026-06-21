@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from rete.alpha import AlphaMemory
-from rete.condition import Pattern, Production
+from rete.condition import AccumulateSpec, Pattern, Production
 from rete.fact import Fact, Token
 
 if TYPE_CHECKING:
@@ -80,9 +80,9 @@ class BetaMemory:
 
     items: list[Token] = field(default_factory=list)
     successors: list[LeftNode] = field(default_factory=list, repr=False)
-    parent_join: JoinNode | NegativeJoinNode | NccNode | None = field(
-        default=None, repr=False
-    )
+    parent_join: (
+        JoinNode | NegativeJoinNode | ExistsNode | AccumulateNode | NccNode | None
+    ) = field(default=None, repr=False)
 
     def left_activate(self, token: Token) -> None:
         """Store *token* and notify downstream join nodes.
@@ -395,6 +395,271 @@ class NegativeJoinNode(BaseJoinNode):
 
 
 @dataclass
+class ExistsToken:
+    """Pairs a left-input token with its count of matching right Facts.
+
+    :see: Doorenbos §2.7 (symmetric to :class:`NegativeToken`)
+    """
+
+    token: Token
+    count: int = 0
+
+
+@dataclass
+class ExistsNode(BaseJoinNode):
+    """Existential join node: emits a token downstream only while count > 0.
+
+    Mirror image of :class:`NegativeJoinNode`: emits on the 0→1 right-match
+    transition and retracts on the 1→0 transition.  The emitted token is the
+    left token unchanged — no binding is extracted from the right fact.
+
+    :see: Doorenbos §2.7
+    """
+
+    left_input: BetaMemory | DummyTopNode = field(default_factory=DummyTopNode)
+    items: list[ExistsToken] = field(default_factory=list)
+
+    def left_activate(self, token: Token) -> None:
+        """Handle a new token from the left input.
+
+        Re-links from alpha memory if previously right-unlinked.
+
+        :param token: the partial match entering from the left
+        """
+        if self.right_unlinked:
+            self.alpha_memory.successors.append(self)
+            self.right_unlinked = False
+        count = self._count_matches(token)
+        exists_tok = ExistsToken(token=token, count=count)
+        self.items.append(exists_tok)
+        if count > 0:
+            for child in self.children:
+                child.left_activate(token)
+
+    def right_activate(self, fact: Fact) -> None:
+        """Handle a new Fact arriving in the alpha memory (right input).
+
+        :param fact: the Fact that just entered the alpha memory
+        """
+        for exists_tok in self.items:
+            if self._passes_tests(exists_tok.token, fact):
+                self._increment(exists_tok)
+
+    def right_retract(self, fact: Fact) -> None:
+        """Handle removal of a Fact from the alpha memory.
+
+        :param fact: the Fact being retracted
+        """
+        for exists_tok in self.items:
+            if self._passes_tests(exists_tok.token, fact):
+                self._decrement(exists_tok)
+
+    def left_retract(self, token: Token) -> None:
+        """Handle removal of a token from the left input.
+
+        Right-unlinks from alpha memory when the items list drains to zero.
+
+        :param token: the partial match being retracted
+        """
+        exists_tok = self._find_exists_tok(token)
+        if exists_tok.count > 0:
+            for child in self.children:
+                child.left_retract(token)
+        self.items.remove(exists_tok)
+        if not self.items and not self.right_unlinked:
+            self.alpha_memory.successors.remove(self)
+            self.right_unlinked = True
+
+    def update_child(self, child: object) -> None:
+        """Seed *child* with all currently emitted tokens (count > 0).
+
+        :param child: a newly attached downstream node
+        :see: Doorenbos §2.6 ``update-new-node-with-matches-from-above``
+        """
+        for exists_tok in self.items:
+            if exists_tok.count > 0:
+                child.left_activate(exists_tok.token)
+
+    def _find_exists_tok(self, token: Token) -> ExistsToken:
+        """Return the ExistsToken whose ``.token`` is *token*.
+
+        :param token: the left-input token to look up
+        """
+        return next(et for et in self.items if et.token is token)
+
+    def _increment(self, exists_tok: ExistsToken) -> None:
+        """Emit downstream token on 0→1 count transition.
+
+        :param exists_tok: the ExistsToken to update
+        """
+        if exists_tok.count == 0:
+            for child in self.children:
+                child.left_activate(exists_tok.token)
+        exists_tok.count += 1
+
+    def _decrement(self, exists_tok: ExistsToken) -> None:
+        """Retract downstream token on 1→0 count transition.
+
+        :param exists_tok: the ExistsToken to update
+        """
+        exists_tok.count -= 1
+        if exists_tok.count == 0:
+            for child in self.children:
+                child.left_retract(exists_tok.token)
+
+    def _count_matches(self, token: Token) -> int:
+        """Count right Facts that pass all join tests for *token*.
+
+        :param token: the left-input token to test against
+        """
+        return sum(
+            1 for fact in self.alpha_memory.items if self._passes_tests(token, fact)
+        )
+
+    def _initialize_from(self, tokens: Iterable[Token]) -> None:
+        """Seed this node by left-activating each token in *tokens*.
+
+        :param tokens: an iterable of :class:`Token` objects
+        """
+        for t in tokens:
+            self.left_activate(t)
+
+
+@dataclass
+class AccState:
+    """Per-left-token accumulator state for :class:`AccumulateNode`.
+
+    :param token: the left-input token this state tracks.
+    :param facts: right facts currently contributing to the aggregate.
+    :param emitted: downstream token currently live; ``None`` when nothing emitted.
+    """
+
+    token: Token
+    facts: list[Fact] = field(default_factory=list)
+    emitted: Token | None = None
+
+
+@dataclass
+class AccumulateNode(BaseJoinNode):
+    """Accumulate join node: aggregates right facts per left token.
+
+    For each left token an :class:`AccState` is maintained.  When the
+    aggregate value changes (right fact added or retracted), the node
+    retracts the old downstream token and emits a new one carrying the
+    result in its ``bindings`` dict.  A constraint callable gates the emit.
+
+    :see: plan/PARSER-PLAN-STEP-ES9.md
+    """
+
+    left_input: BetaMemory | DummyTopNode = field(default_factory=DummyTopNode)
+    spec: AccumulateSpec | None = field(default=None)
+    states: list[AccState] = field(default_factory=list)
+
+    def left_activate(self, token: Token) -> None:
+        """Handle a new token from the left input.
+
+        :param token: the partial match entering from the left
+        """
+        if self.right_unlinked:
+            self.alpha_memory.successors.append(self)
+            self.right_unlinked = False
+        matching = [f for f in self.alpha_memory.items if self._passes_tests(token, f)]
+        state = AccState(token=token, facts=matching)
+        self.states.append(state)
+        self._update_result(state)
+
+    def right_activate(self, fact: Fact) -> None:
+        """Handle a new Fact arriving in the alpha memory (right input).
+
+        :param fact: the Fact that just entered the alpha memory
+        """
+        for state in self.states:
+            if self._passes_tests(state.token, fact):
+                self._add_right(state, fact)
+
+    def right_retract(self, fact: Fact) -> None:
+        """Handle removal of a Fact from the alpha memory.
+
+        :param fact: the Fact being retracted
+        """
+        for state in self.states:
+            if fact in state.facts:
+                self._remove_right(state, fact)
+
+    def left_retract(self, token: Token) -> None:
+        """Handle removal of a token from the left input.
+
+        :param token: the partial match being retracted
+        """
+        state = self._find_state(token)
+        self._retract_result(state)
+        self.states.remove(state)
+        if not self.states and not self.right_unlinked:
+            self.alpha_memory.successors.remove(self)
+            self.right_unlinked = True
+
+    def update_child(self, child: object) -> None:
+        """Seed *child* with all currently emitted tokens.
+
+        :param child: a newly attached downstream node
+        :see: Doorenbos §2.6 ``update-new-node-with-matches-from-above``
+        """
+        for state in self.states:
+            if state.emitted is not None:
+                child.left_activate(state.emitted)
+
+    def _initialize_from(self, tokens: Iterable[Token]) -> None:
+        """Seed this node by left-activating each token in *tokens*.
+
+        :param tokens: an iterable of :class:`Token` objects
+        """
+        for t in tokens:
+            self.left_activate(t)
+
+    def _add_right(self, state: AccState, fact: Fact) -> None:
+        state.facts.append(fact)
+        self._update_result(state)
+
+    def _remove_right(self, state: AccState, fact: Fact) -> None:
+        state.facts.remove(fact)
+        self._update_result(state)
+
+    def _compute(self, state: AccState) -> object:
+        if self.spec.bind_attr is None:
+            return self.spec.fn(state.facts)
+        return self.spec.fn([getattr(f.obj, self.spec.bind_attr) for f in state.facts])
+
+    def _update_result(self, state: AccState) -> None:
+        value = self._compute(state)
+        passes = value is not None and (
+            self.spec.constraint is None or self.spec.constraint(value)
+        )
+        if state.emitted is not None:
+            self._retract_result(state)
+        if passes:
+            self._emit_result(state, value)
+
+    def _emit_result(self, state: AccState, value: object) -> None:
+        new_token = Token(
+            facts=state.token.facts,
+            bindings={**state.token.bindings, self.spec.result_var: value},
+        )
+        state.emitted = new_token
+        for child in self.children:
+            child.left_activate(new_token)
+
+    def _retract_result(self, state: AccState) -> None:
+        if state.emitted is None:
+            return
+        for child in self.children:
+            child.left_retract(state.emitted)
+        state.emitted = None
+
+    def _find_state(self, token: Token) -> AccState:
+        return next(s for s in self.states if s.token is token)
+
+
+@dataclass
 class NccToken:
     """Left token paired with its count of subnetwork matches and their result tokens.
 
@@ -423,7 +688,7 @@ class NccPartnerNode:
 
     ncc_node: NccNode = field(repr=False)
     items: list[Token] = field(default_factory=list)
-    sub_last_join: JoinNode = field(init=False, repr=False)
+    sub_last_join: JoinNode | NegativeJoinNode = field(init=False, repr=False)
 
     def left_activate(self, token: Token) -> None:
         """Forward *token* to the NCC node, buffering if no owner token yet.
@@ -601,9 +866,9 @@ class PNode:
     production: Production
     conflict_set: list[Instantiation]
     items: list[Token] = field(default_factory=list)
-    parent_join: JoinNode | NegativeJoinNode | NccNode | None = field(
-        default=None, repr=False
-    )
+    parent_join: (
+        JoinNode | NegativeJoinNode | ExistsNode | AccumulateNode | NccNode | None
+    ) = field(default=None, repr=False)
 
     def left_activate(self, token: Token) -> None:
         """Record a full match.

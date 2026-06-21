@@ -52,6 +52,8 @@ class Pattern:
     :param join_tests: :class:`JoinSpec` references for cross-fact constraints
     :param bindings: ``(var_name, attr_name)`` pairs to extract on a match
     :param negated: if ``True``, production fires only when no match exists
+    :param exists: if ``True``, production fires when at least one match exists
+        (fires once per left token, not once per matching right fact)
     :see: UPDATE_PLAN §Step 2
     """
 
@@ -60,6 +62,7 @@ class Pattern:
     join_tests: tuple[JoinSpec, ...] = ()
     bindings: tuple[tuple[str, str], ...] = ()
     negated: bool = False
+    exists: bool = False
 
     def matches(self, fact: Fact) -> bool:
         """Return ``True`` iff *fact* passes the type check and all alpha tests.
@@ -104,6 +107,26 @@ class NccGroup:
     conditions: tuple[Pattern, ...]
 
 
+@dataclass(frozen=True)
+class AccumulateSpec:
+    """Compile-time descriptor for an ``accumulate`` LHS condition.
+
+    :param inner: compiled inner :class:`Pattern` — supplies the alpha memory.
+    :param fn: resolved accumulation callable; receives a ``list`` of field values
+        (or ``list[Fact]`` when ``bind_attr`` is ``None`` for ``count``).
+    :param bind_attr: attribute to extract per :class:`~rete.fact.Fact`;
+        ``None`` for ``count``.
+    :param result_var: token binding key for the result, e.g. ``"$total"``.
+    :param constraint: gate callable ``(value) → bool``; ``None`` means always emit.
+    """
+
+    inner: Pattern
+    fn: Callable[[list], Any]
+    bind_attr: str | None
+    result_var: str
+    constraint: Callable[[Any], bool] | None = None
+
+
 @dataclass
 class Production:
     """A production rule: an LHS list of patterns and a callable RHS.
@@ -111,8 +134,13 @@ class Production:
     The RHS receives the matched :class:`~rete.fact.Token`; variable bindings
     are available via ``token.bindings``.
 
+    :param no_loop: when ``True``, prevents self-reactivation — any new
+        conflict-set entries for this production that are created during its
+        own RHS execution are removed before the next cycle.
+
     :see: Doorenbos §2.1
     """
 
-    lhs: list[Pattern | NccGroup]
+    lhs: list[Pattern | NccGroup | AccumulateSpec]
     rhs: Callable[[Token], None]
+    no_loop: bool = False
