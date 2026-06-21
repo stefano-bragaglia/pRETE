@@ -107,6 +107,26 @@ class NccGroup:
     conditions: tuple[Pattern, ...]
 
 
+@dataclass(frozen=True)
+class AccumulateSpec:
+    """Compile-time descriptor for an ``accumulate`` LHS condition.
+
+    :param inner: compiled inner :class:`Pattern` — supplies the alpha memory.
+    :param fn: resolved accumulation callable; receives a ``list`` of field values
+        (or ``list[Fact]`` when ``bind_attr`` is ``None`` for ``count``).
+    :param bind_attr: attribute to extract per :class:`~rete.fact.Fact`;
+        ``None`` for ``count``.
+    :param result_var: token binding key for the result, e.g. ``"$total"``.
+    :param constraint: gate callable ``(value) → bool``; ``None`` means always emit.
+    """
+
+    inner: Pattern
+    fn: Callable[[list], Any]
+    bind_attr: str | None
+    result_var: str
+    constraint: Callable[[Any], bool] | None = None
+
+
 @dataclass
 class Production:
     """A production rule: an LHS list of patterns and a callable RHS.
@@ -121,6 +141,6 @@ class Production:
     :see: Doorenbos §2.1
     """
 
-    lhs: list[Pattern | NccGroup]
+    lhs: list[Pattern | NccGroup | AccumulateSpec]
     rhs: Callable[[Token], None]
     no_loop: bool = False

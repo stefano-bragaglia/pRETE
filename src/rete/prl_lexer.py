@@ -20,7 +20,7 @@ _KEYWORDS: frozenset[str] = frozenset({
     "package", "declare", "extends", "rule", "end",
     "when", "then", "not", "salience",
     "import", "from", "as",
-    "or", "forall", "exists",
+    "or", "forall", "exists", "accumulate",
     "true", "false", "null", "None",
     "True", "False",
 })

@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 
 from rete.alpha import AlphaMemory, RootNode
 from rete.beta import (
+    AccumulateNode,
+    BaseJoinNode,
     BetaMemory,
     DummyTopNode,
     ExistsNode,
@@ -19,7 +21,7 @@ from rete.beta import (
     NegativeJoinNode,
     PNode,
 )
-from rete.condition import NccGroup, Pattern, Production
+from rete.condition import AccumulateSpec, NccGroup, Pattern, Production
 from rete.fact import Fact
 
 
@@ -89,14 +91,7 @@ class ReteNetwork:
         jn = p_node.parent_join
         jn.children.remove(p_node)
         p_node.parent_join = None
-        if isinstance(jn, NegativeJoinNode):
-            self._gc_negative_join_node(jn)
-        elif isinstance(jn, ExistsNode):
-            self._gc_exists_node(jn)
-        elif isinstance(jn, NccNode):
-            self._gc_ncc_node(jn)
-        else:
-            self._gc_join_node(jn)
+        self._gc_join_like(jn)
 
     # ------------------------------------------------------------------
     # Network construction helpers (Doorenbos §2.6, §2.8)
@@ -104,10 +99,10 @@ class ReteNetwork:
 
     def _build_join_chain(
         self, lhs: list[Pattern | NccGroup]
-    ) -> JoinNode | NegativeJoinNode | ExistsNode | NccNode:
+    ) -> JoinNode | NegativeJoinNode | ExistsNode | AccumulateNode | NccNode:
         """Build or share the join-node chain for *lhs*.
 
-        :param lhs: ordered list of patterns / NCC groups from the production LHS
+        :param lhs: ordered list of patterns / NCC groups / AccumulateSpecs
         :returns: the last node in the compiled chain
         :see: Doorenbos §2.6 ``build-or-share-network-for-conditions``, §2.8
         """
@@ -117,6 +112,8 @@ class ReteNetwork:
         for i, item in enumerate(lhs):
             if isinstance(item, NccGroup):
                 last = self._build_ncc(left, earlier, item)
+            elif isinstance(item, AccumulateSpec):
+                last = self._build_accumulate(left, earlier, item)
             else:
                 last = self._process_condition(item, left, earlier)
                 earlier.append(item)
@@ -434,7 +431,8 @@ class ReteNetwork:
         )
 
     def _build_or_share_beta_memory(
-        self, parent_join: JoinNode | NegativeJoinNode | ExistsNode | NccNode
+        self,
+        parent_join: JoinNode | NegativeJoinNode | ExistsNode | AccumulateNode | NccNode,  # noqa: E501
     ) -> BetaMemory:
         """Return the existing BetaMemory child of *parent_join* or create one.
 
@@ -500,6 +498,63 @@ class ReteNetwork:
             en.left_input.successors.remove(en)
             self._gc_beta_memory(en.left_input)
 
+    def _build_accumulate(
+        self,
+        left: BetaMemory | DummyTopNode,
+        earlier: list[Pattern],
+        spec: AccumulateSpec,
+    ) -> AccumulateNode:
+        """Build and wire an :class:`AccumulateNode` for *spec*.
+
+        :param left: current left input on the main chain
+        :param earlier: patterns already compiled (for JoinTest derivation)
+        :param spec: the compile-time accumulate descriptor
+        """
+        am = self.root.build_or_share_alpha_memory(spec.inner)
+        tests = JoinTest.extract(spec.inner, earlier)
+        # ponytail: no sharing — each AccumulateSpec has a distinct fn/result_var
+        an = AccumulateNode(
+            children=[], alpha_memory=am, left_input=left, tests=tests, spec=spec
+        )
+        self._init_accumulate_links(an, left, am)
+        an._initialize_from(left.items)
+        return an
+
+    def _init_accumulate_links(
+        self,
+        an: AccumulateNode,
+        left: BetaMemory | DummyTopNode,
+        am: AlphaMemory,
+    ) -> None:
+        """Set initial link state for a newly built :class:`AccumulateNode`.
+
+        Mirrors :meth:`_init_exists_node_links` — only right unlinking applies.
+
+        :param an: the newly created AccumulateNode
+        :param left: its left input
+        :param am: its alpha memory (right input)
+        """
+        if isinstance(left, BetaMemory) and not left.items:
+            an.right_unlinked = True
+            left.successors.append(an)
+        else:
+            am.successors.append(an)
+            if isinstance(left, BetaMemory):
+                left.successors.append(an)
+
+    def _gc_accumulate_node(self, an: AccumulateNode) -> None:
+        """Remove *an* from the network if it has no remaining children.
+
+        :param an: the AccumulateNode to potentially garbage-collect
+        """
+        if an.children:
+            return
+        if not an.right_unlinked:
+            an.alpha_memory.successors.remove(an)
+        if isinstance(an.left_input, BetaMemory):
+            an.left_input.successors.remove(an)
+            self._gc_beta_memory(an.left_input)
+
     def _gc_ncc_node(self, ncc: NccNode) -> None:
         """Remove *ncc* from the network if it has no remaining children.
 
@@ -530,9 +585,13 @@ class ReteNetwork:
         if bm.successors or bm.parent_join is None:
             return
         bm.parent_join.children.remove(bm)
-        if isinstance(bm.parent_join, NegativeJoinNode):
-            self._gc_negative_join_node(bm.parent_join)
-        elif isinstance(bm.parent_join, NccNode):
-            self._gc_ncc_node(bm.parent_join)
-        else:
-            self._gc_join_node(bm.parent_join)
+        self._gc_join_like(bm.parent_join)
+
+    def _gc_join_like(self, jn: BaseJoinNode) -> None:
+        dispatch = {
+            NegativeJoinNode: self._gc_negative_join_node,
+            ExistsNode: self._gc_exists_node,
+            AccumulateNode: self._gc_accumulate_node,
+            NccNode: self._gc_ncc_node,
+        }
+        dispatch.get(type(jn), self._gc_join_node)(jn)

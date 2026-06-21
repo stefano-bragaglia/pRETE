@@ -871,3 +871,165 @@ class TestExistsIntegration:
         engine.remove_fact(invoice)
         engine.run()
         assert results == []
+
+
+# ===========================================================================
+# CEP integration
+# ===========================================================================
+
+
+_CEP_SRC = """\
+@role(event)
+@expires(30s)
+declare Reading
+  @timestamp
+  ts: float
+  sensor: str
+end
+
+declare Plain
+  value: int
+end
+"""
+
+
+class TestCepIntegration:
+    def test_event_present_before_clock_advance(self) -> None:
+        engine, types = _setup(_CEP_SRC)
+        fired = []
+        from rete.condition import Pattern, Production
+        engine.add_production(Production(
+            lhs=[Pattern(types["Reading"])],
+            rhs=lambda t: fired.append(1),
+        ))
+        engine.add_fact(Fact(types["Reading"](ts=0.0, sensor="s1")))
+        engine.run()
+        assert fired == [1]
+
+    def test_event_auto_retracted_after_advance(self) -> None:
+        engine, types = _setup(_CEP_SRC)
+        f = Fact(types["Reading"](ts=0.0, sensor="s1"))
+        engine.add_fact(f)
+        engine.advance_clock(31.0)
+        engine.run()
+        assert f not in engine.network.root._facts
+
+    def test_non_event_not_retracted(self) -> None:
+        engine, types = _setup(_CEP_SRC)
+        f = Fact(types["Plain"](value=42))
+        engine.add_fact(f)
+        engine.advance_clock(9999.0)
+        engine.run()
+        assert f in engine.network.root._facts
+
+
+# ===========================================================================
+# Accumulate integration
+# ===========================================================================
+
+
+_ACC_SRC = """\
+declare Order
+  amount: float
+end
+
+rule "sum orders"
+  when
+    accumulate(
+      Order($amount: amount);
+      $total: sum($amount)
+    )
+  then
+    results.append($total)
+end
+"""
+
+_ACC_CONSTRAINED_SRC = """\
+declare Order
+  amount: float
+end
+
+rule "flag large total"
+  when
+    accumulate(
+      Order($amount: amount);
+      $total: sum($amount);
+      $total > 100
+    )
+  then
+    results.append($total)
+end
+"""
+
+_ACC_COUNT_SRC = """\
+declare Order
+  amount: float
+end
+
+rule "count orders"
+  when
+    accumulate(
+      Order($amount: amount);
+      $n: count()
+    )
+  then
+    results.append($n)
+end
+"""
+
+
+class TestAccumulateIntegration:
+    def test_sum_no_facts_fires_zero(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_SRC, {"results": results})
+        engine.run()
+        assert results == [0]
+
+    def test_sum_single_fact(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=50.0)))
+        engine.run()
+        assert results[-1] == 50.0
+
+    def test_sum_multiple_facts(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=30.0)))
+        engine.add_fact(Fact(types["Order"](amount=20.0)))
+        engine.run()
+        assert results[-1] == 50.0
+
+    def test_sum_updates_on_retract(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_SRC, {"results": results})
+        f = Fact(types["Order"](amount=30.0))
+        engine.add_fact(f)
+        engine.add_fact(Fact(types["Order"](amount=20.0)))
+        engine.run()
+        results.clear()
+        engine.remove_fact(f)
+        engine.run()
+        assert results[-1] == 20.0
+
+    def test_count_fires(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_COUNT_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=1.0)))
+        engine.add_fact(Fact(types["Order"](amount=2.0)))
+        engine.run()
+        assert results[-1] == 2
+
+    def test_constraint_blocks_below_threshold(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_CONSTRAINED_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=50.0)))
+        engine.run()
+        assert results == []
+
+    def test_constraint_fires_above_threshold(self) -> None:
+        results = []
+        engine, types = _setup(_ACC_CONSTRAINED_SRC, {"results": results})
+        engine.add_fact(Fact(types["Order"](amount=150.0)))
+        engine.run()
+        assert results == [150.0]

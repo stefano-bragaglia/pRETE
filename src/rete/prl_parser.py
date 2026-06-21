@@ -6,6 +6,7 @@ Converts a flat list of :class:`~rete.prl_lexer.Tok` instances produced by
 from __future__ import annotations
 
 from rete.prl_ast import (
+    AccumulateExpr,
     BindConstraint,
     CompareConstraint,
     DeclareDecl,
@@ -258,14 +259,67 @@ class Parser:
         branches.append(tuple(current))
         return (OrGroup(tuple(branches)),)
 
-    def _parse_condition(self) -> PatternNode | NccPatternGroup | ForallNode:
+    def _parse_condition(
+        self,
+    ) -> PatternNode | NccPatternGroup | ForallNode | AccumulateExpr:
         if self._peek_kw("not"):
             return self._parse_negated()
         if self._peek_kw("forall"):
             return self._parse_forall()
         if self._peek_kw("exists"):
             return self._parse_exists()
+        if self._peek_kw("accumulate"):
+            return self._parse_accumulate()
         return self._parse_pattern()
+
+    def _parse_accumulate(self) -> AccumulateExpr:
+        """Parse ``accumulate(inner; $result: fn($var); constraint?)``."""
+        self._expect("KW", "accumulate")
+        self._expect("PUNCT", "(")
+        inner = self._parse_pattern()
+        self._expect("PUNCT", ";")
+        result_var, function, bind_var = self._parse_result_binding()
+        constraint = self._parse_acc_constraint(result_var)
+        self._expect("PUNCT", ")")
+        return AccumulateExpr(
+            inner=inner,
+            result_var=result_var,
+            function=function,
+            bind_var=bind_var,
+            constraint=constraint,
+        )
+
+    def _parse_result_binding(self) -> tuple[str, str, str | None]:
+        """Parse ``$result: fn($var?)`` and return ``(result_var, function, bind_var)``.
+
+        :returns: ``(result_var, function_name, bind_var)`` where *bind_var* is
+            ``None`` for ``count()``.
+        """
+        result_var = self._expect("VAR").value
+        self._expect("PUNCT", ":")
+        function = self._expect("IDENT").value
+        self._expect("PUNCT", "(")
+        bind_var: str | None = None
+        if self._peek_kind("VAR"):
+            bind_var = self._advance().value
+        self._expect("PUNCT", ")")
+        return result_var, function, bind_var
+
+    def _parse_acc_constraint(
+        self, result_var: str
+    ) -> CompareConstraint | None:
+        """Parse optional ``;  $result OP literal`` constraint.
+
+        :param result_var: the result variable (used as the constraint field).
+        :returns: :class:`CompareConstraint` or ``None`` if no constraint present.
+        """
+        if not self._peek_punct(";"):
+            return None
+        self._advance()
+        self._expect("VAR", result_var)
+        op = self._expect("OP").value
+        rhs = self._parse_literal()
+        return CompareConstraint(result_var, op, rhs)
 
     def _parse_exists(self) -> PatternNode:
         """Parse ``exists Pattern(…)`` — existential check without binding."""

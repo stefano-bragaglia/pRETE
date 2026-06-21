@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from rete.alpha import AlphaMemory
 from rete.beta import (
+    AccumulateNode,
     BetaMemory,
     DummyTopNode,
     ExistsNode,
@@ -20,13 +21,20 @@ from rete.beta import (
     NegativeToken,
     PNode,
 )
-from rete.condition import JoinSpec, Pattern, Production
+from rete.condition import AccumulateSpec, JoinSpec, Pattern, Production
 from rete.fact import Fact, Token
 
 
 # ---------------------------------------------------------------------------
 # Test dataclasses
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Val:
+    """Simple fact type for accumulate tests."""
+
+    value: float
 
 
 @dataclass
@@ -1192,3 +1200,219 @@ def test_exists_node_right_unlink_state_when_beta_empty():
     bm.successors.append(en)
     assert en.right_unlinked is True
     assert en not in am.successors
+
+
+# ===========================================================================
+# AccumulateNode
+# ===========================================================================
+
+
+class TestAccumulate:
+    """AccumulateNode: per-left-token aggregation, emit/retract lifecycle."""
+
+    def _am(self):
+        return AlphaMemory(type_=_Val, predicate=lambda obj: isinstance(obj, _Val))
+
+    def _make_node(self, spec):
+        am = self._am()
+        an = AccumulateNode(
+            children=[], alpha_memory=am, left_input=DummyTopNode(), tests=[], spec=spec
+        )
+        am.successors.append(an)  # mirror what _init_accumulate_links does
+        rec = _Recorder()
+        an.children.append(rec)
+        return an, am, rec
+
+    def _sum_spec(self, constraint=None):
+        return AccumulateSpec(
+            inner=Pattern(_Val, bindings=(("$v", "value"),)),
+            fn=lambda vals: sum(vals),
+            bind_attr="value",
+            result_var="$total",
+            constraint=constraint,
+        )
+
+    def _count_spec(self):
+        return AccumulateSpec(
+            inner=Pattern(_Val),
+            fn=lambda vals: len(vals),
+            bind_attr=None,
+            result_var="$n",
+        )
+
+    def _min_spec(self):
+        return AccumulateSpec(
+            inner=Pattern(_Val, bindings=(("$v", "value"),)),
+            fn=lambda vals: min(vals) if vals else None,
+            bind_attr="value",
+            result_var="$m",
+        )
+
+    def _max_spec(self):
+        return AccumulateSpec(
+            inner=Pattern(_Val, bindings=(("$v", "value"),)),
+            fn=lambda vals: max(vals) if vals else None,
+            bind_attr="value",
+            result_var="$m",
+        )
+
+    def _collect_spec(self):
+        return AccumulateSpec(
+            inner=Pattern(_Val, bindings=(("$v", "value"),)),
+            fn=lambda vals: list(vals),
+            bind_attr="value",
+            result_var="$lst",
+        )
+
+    # ------------------------------------------------------------------
+    # Initial state via right facts already in alpha memory
+    # ------------------------------------------------------------------
+
+    def test_sum_initial_state(self):
+        an, am, rec = self._make_node(self._sum_spec())
+        am.items += [Fact(_Val(10.0)), Fact(_Val(20.0))]
+        an.left_activate(Token())
+        assert rec.activated[0].bindings["$total"] == 30.0
+
+    def test_count_increments(self):
+        an, am, rec = self._make_node(self._count_spec())
+        for _ in range(3):
+            am.items.append(Fact(_Val(1.0)))
+        an.left_activate(Token())
+        assert rec.activated[0].bindings["$n"] == 3
+
+    def test_min_initial(self):
+        an, am, rec = self._make_node(self._min_spec())
+        am.items += [Fact(_Val(3.0)), Fact(_Val(1.0)), Fact(_Val(2.0))]
+        an.left_activate(Token())
+        assert rec.activated[0].bindings["$m"] == 1.0
+
+    def test_max_initial(self):
+        an, am, rec = self._make_node(self._max_spec())
+        am.items += [Fact(_Val(1.0)), Fact(_Val(5.0)), Fact(_Val(2.0))]
+        an.left_activate(Token())
+        assert rec.activated[0].bindings["$m"] == 5.0
+
+    def test_collectlist(self):
+        an, am, rec = self._make_node(self._collect_spec())
+        am.items += [Fact(_Val(1.0)), Fact(_Val(2.0))]
+        an.left_activate(Token())
+        assert sorted(rec.activated[0].bindings["$lst"]) == [1.0, 2.0]
+
+    # ------------------------------------------------------------------
+    # Incremental right_activate / right_retract
+    # ------------------------------------------------------------------
+
+    def test_right_activate_updates_sum(self):
+        an, am, rec = self._make_node(self._sum_spec())
+        tok = Token()
+        an.left_activate(tok)
+        f = Fact(_Val(15.0))
+        am.items.append(f)
+        an.right_activate(f)
+        assert rec.activated[-1].bindings["$total"] == 15.0
+
+    def test_right_retract_updates_sum(self):
+        an, am, rec = self._make_node(self._sum_spec())
+        f1, f2 = Fact(_Val(10.0)), Fact(_Val(20.0))
+        am.items += [f1, f2]
+        an.left_activate(Token())
+        an.right_retract(f1)
+        assert rec.activated[-1].bindings["$total"] == 20.0
+
+    def test_right_retract_min_rescans(self):
+        an, am, rec = self._make_node(self._min_spec())
+        f1, f2, f3 = Fact(_Val(1.0)), Fact(_Val(3.0)), Fact(_Val(5.0))
+        am.items += [f1, f2, f3]
+        an.left_activate(Token())
+        assert rec.activated[-1].bindings["$m"] == 1.0
+        an.right_retract(f1)  # retract current minimum
+        assert rec.activated[-1].bindings["$m"] == 3.0
+
+    # ------------------------------------------------------------------
+    # Constraint gating
+    # ------------------------------------------------------------------
+
+    def test_constraint_gates_emit(self):
+        constraint = lambda v: v > 100  # noqa: E731
+        an, am, rec = self._make_node(self._sum_spec(constraint=constraint))
+        an.left_activate(Token())
+        assert rec.activated == []  # sum=0 < 100
+
+    def test_constraint_satisfied_after_add(self):
+        constraint = lambda v: v > 100  # noqa: E731
+        an, am, rec = self._make_node(self._sum_spec(constraint=constraint))
+        an.left_activate(Token())
+        f = Fact(_Val(150.0))
+        am.items.append(f)
+        an.right_activate(f)
+        assert len(rec.activated) == 1
+        assert rec.activated[0].bindings["$total"] == 150.0
+
+    def test_constraint_violated_after_retract(self):
+        constraint = lambda v: v > 100  # noqa: E731
+        an, am, rec = self._make_node(self._sum_spec(constraint=constraint))
+        f1, f2 = Fact(_Val(75.0)), Fact(_Val(75.0))
+        am.items += [f1, f2]
+        an.left_activate(Token())
+        assert rec.activated[-1].bindings["$total"] == 150.0
+        an.right_retract(f1)
+        assert rec.retracted  # old 150-token was retracted
+        assert not any(
+            t.bindings.get("$total", 0) > 100 for t in rec.activated
+            if t not in rec.retracted
+        )
+
+    # ------------------------------------------------------------------
+    # left_retract
+    # ------------------------------------------------------------------
+
+    def test_left_retract_tears_down_state(self):
+        an, am, rec = self._make_node(self._sum_spec())
+        tok = Token()
+        an.left_activate(tok)
+        an.left_retract(tok)
+        assert rec.retracted  # emitted token (sum=0) was retracted
+        assert an.states == []
+
+    def test_left_retract_no_emitted_token(self):
+        constraint = lambda v: v > 9999  # noqa: E731
+        an, am, rec = self._make_node(self._sum_spec(constraint=constraint))
+        tok = Token()
+        an.left_activate(tok)
+        # constraint never met — no emitted token
+        an.left_retract(tok)  # must not raise
+        assert an.states == []
+
+    # ------------------------------------------------------------------
+    # Empty-set behaviour
+    # ------------------------------------------------------------------
+
+    def test_empty_facts_count_zero(self):
+        an, am, rec = self._make_node(self._count_spec())
+        an.left_activate(Token())
+        assert rec.activated[0].bindings["$n"] == 0
+
+    def test_empty_facts_sum_zero(self):
+        an, am, rec = self._make_node(self._sum_spec())
+        an.left_activate(Token())
+        assert rec.activated[0].bindings["$total"] == 0
+
+    def test_empty_min_no_emit(self):
+        an, am, rec = self._make_node(self._min_spec())
+        an.left_activate(Token())
+        assert rec.activated == []  # min([]) → None → no emit
+
+    # ------------------------------------------------------------------
+    # update_child seeding
+    # ------------------------------------------------------------------
+
+    def test_update_child_seeds_emitted(self):
+        an, am, rec = self._make_node(self._sum_spec())
+        f = Fact(_Val(42.0))
+        am.items.append(f)
+        an.left_activate(Token())
+        late = _Recorder()
+        an.children.append(late)
+        an.update_child(late)
+        assert late.activated[0].bindings["$total"] == 42.0

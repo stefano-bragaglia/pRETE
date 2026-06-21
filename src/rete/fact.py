@@ -25,6 +25,7 @@ class Fact:
     obj: Any
     alpha_memories: list[AlphaMemory] = field(default_factory=list, repr=False)
     beta_tokens: list[tuple[Token, LeftNode]] = field(default_factory=list, repr=False)
+    timestamp: float | None = None
 
 
 

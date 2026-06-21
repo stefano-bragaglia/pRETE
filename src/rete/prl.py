@@ -26,9 +26,10 @@ from dataclasses import make_dataclass
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Callable
 
-from rete.condition import JoinSpec, NccGroup, Pattern, Production
+from rete.condition import AccumulateSpec, JoinSpec, NccGroup, Pattern, Production
 from rete.fact import Fact, Token
 from rete.prl_ast import (
+    AccumulateExpr,
     BindConstraint,
     CompareConstraint,
     DeclareDecl,
@@ -68,6 +69,14 @@ _OPS: dict[str, Any] = {
 }
 
 _VAR_RE = re.compile(r"\$([A-Za-z_]\w*)")
+
+_ACCUMULATE_FNS: dict[str, Any] = {
+    "count": lambda vals: len(vals),
+    "sum": lambda vals: sum(vals),
+    "min": lambda vals: min(vals) if vals else None,
+    "max": lambda vals: max(vals) if vals else None,
+    "collectList": lambda vals: list(vals),
+}
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -208,6 +217,7 @@ def _compile_declare(decl: DeclareDecl, types: dict[str, type]) -> type:
         cls = make_dataclass(decl.name, fields, **kwargs)
     if key_names:
         _inject_key_eq(cls, key_names)
+    _attach_event_meta(cls, decl)
     return cls
 
 
@@ -222,12 +232,67 @@ def _key_fields(decl: DeclareDecl) -> tuple[str, ...]:
     return tuple(fd.name for fd in decl.fields if _has_key_tag(fd))
 
 
+def _has_tag(fd: FieldDecl, tag_name: str) -> bool:
+    """Return True iff *fd* has at least one tag with *tag_name*.
+
+    :param fd: a field declaration node.
+    :param tag_name: the tag name to look for.
+    """
+    return any(t.name == tag_name for t in fd.tags)
+
+
 def _has_key_tag(fd: FieldDecl) -> bool:
     """Return True iff *fd* has at least one tag named ``"key"``.
 
     :param fd: a field declaration node.
     """
-    return any(t.name == "key" for t in fd.tags)
+    return _has_tag(fd, "key")
+
+
+def _parse_time_offset(s: str) -> float:
+    """Convert a time string like ``"10s"``, ``"5m"``, ``"1h30m"`` to seconds.
+
+    :param s: time string using h/m/s units.
+    :raises ValueError: if *s* is empty, has no recognised units, or does not match.
+    """
+    m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", s)
+    if not m or not any(m.groups()):
+        raise ValueError(f"Invalid time offset: {s!r}")
+    h, mins, secs = (int(g) if g else 0 for g in m.groups())
+    return float(h * 3600 + mins * 60 + secs)
+
+
+def _is_event_role(decl: DeclareDecl) -> bool:
+    """Return True iff *decl* has ``@role(event)``."""
+    return any(t.name == "role" and t.value == "event" for t in decl.tags)
+
+
+def _field_with_tag(decl: DeclareDecl, tag_name: str) -> str | None:
+    """Return the first field name in *decl* carrying *tag_name*, or None."""
+    return next((fd.name for fd in decl.fields if _has_tag(fd, tag_name)), None)
+
+
+def _decl_tag_value(decl: DeclareDecl, tag_name: str) -> str | None:
+    """Return the value of the first declare-level tag named *tag_name*, or None."""
+    return next((t.value for t in decl.tags if t.name == tag_name), None)
+
+
+def _attach_event_meta(cls: type, decl: DeclareDecl) -> None:
+    """Attach ``__prl_meta__`` to *cls* if *decl* carries ``@role(event)``.
+
+    :param cls: the freshly created dataclass to annotate.
+    :param decl: the declaration AST node.
+    """
+    if not _is_event_role(decl):
+        return
+    expires_val = _decl_tag_value(decl, "expires")
+    cls.__prl_meta__ = {
+        "role": "event",
+        "timestamp_field": _field_with_tag(decl, "timestamp"),
+        # ponytail: duration_field unused; interval-overlap matching deferred
+        "duration_field": _field_with_tag(decl, "duration"),
+        "expires_delta": _parse_time_offset(expires_val) if expires_val else None,
+    }
 
 
 def _inject_key_eq(cls: type, key_names: tuple[str, ...]) -> None:
@@ -416,13 +481,15 @@ def _compile_lhs(
     :returns: ``(conditions, fact_bindings)`` where *fact_bindings* maps each
         fact-variable string (e.g. ``"$t"``) to its index in *conditions*.
     """
-    conditions: list[Pattern | NccGroup] = []
+    conditions: list[Pattern | NccGroup | AccumulateSpec] = []
     fact_bindings: dict[str, int] = {}
     for idx, node in enumerate(lhs_nodes):
         if isinstance(node, NccPatternGroup):
             conditions.append(_compile_ncc(node, types))
         elif isinstance(node, ForallNode):
             conditions.append(_compile_forall(node, idx, types, fact_bindings))
+        elif isinstance(node, AccumulateExpr):
+            conditions.append(_compile_accumulate(node, types))
         else:
             conditions.append(_compile_pattern(node, idx, types, fact_bindings))
     return conditions, fact_bindings
@@ -618,6 +685,61 @@ def _getattr_path(obj: Any, path: str) -> Any:
     for attr in path.split("."):
         obj = getattr(obj, attr)
     return obj
+
+
+def _compile_accumulate(
+    node: AccumulateExpr, types: dict[str, type]
+) -> AccumulateSpec:
+    """Compile an :class:`AccumulateExpr` to an :class:`AccumulateSpec`.
+
+    :param node: the accumulate AST node.
+    :param types: resolved type mapping.
+    :raises KeyError: if the function name is not a known built-in.
+    :raises NameError: if *bind_var* is not bound in the inner pattern.
+    """
+    inner_pat = _compile_pattern(node.inner, -1, types, {})
+    fn = _ACCUMULATE_FNS[node.function]
+    bind_attr = _resolve_bind_attr(inner_pat, node.bind_var)
+    constraint = _compile_acc_constraint(node.constraint)
+    return AccumulateSpec(
+        inner=inner_pat,
+        fn=fn,
+        bind_attr=bind_attr,
+        result_var=node.result_var,
+        constraint=constraint,
+    )
+
+
+def _resolve_bind_attr(inner: Pattern, bind_var: str | None) -> str | None:
+    """Return the object attribute name for *bind_var* in the inner pattern.
+
+    :param inner: the compiled inner pattern.
+    :param bind_var: dollar-prefixed variable (``"$amount"``); ``None`` for count.
+    :raises NameError: if *bind_var* is not bound in *inner*.
+    """
+    if bind_var is None:
+        return None
+    for var, attr in inner.bindings:
+        if var == bind_var:
+            return attr
+    raise NameError(
+        f"accumulate bind variable {bind_var!r} is not bound in the inner pattern"
+    )
+
+
+def _compile_acc_constraint(
+    constraint: Any,
+) -> Callable[[Any], bool] | None:
+    """Compile an optional accumulate constraint to a callable.
+
+    :param constraint: a :class:`~rete.prl_ast.CompareConstraint` or ``None``.
+    :returns: ``lambda value: op(value, rhs)`` or ``None``.
+    """
+    if constraint is None:
+        return None
+    fn = _OPS[constraint.op]
+    rhs = constraint.rhs
+    return lambda v, _fn=fn, _r=rhs: _fn(v, _r)
 
 
 def _compile_ncc(node: NccPatternGroup, types: dict[str, type]) -> NccGroup:

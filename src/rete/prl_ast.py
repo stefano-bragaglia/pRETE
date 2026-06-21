@@ -23,6 +23,7 @@ __all__ = [
     "NccPatternGroup",
     "OrGroup",
     "ForallNode",
+    "AccumulateExpr",
     "RuleDecl",
     "ProgramNode",
 ]
@@ -197,6 +198,31 @@ class ForallNode:
 
 
 @dataclass(frozen=True)
+class AccumulateExpr:
+    """An accumulate LHS condition: aggregate matching facts and bind the result.
+
+    Named ``AccumulateExpr`` (not ``AccumulateNode``) to avoid collision with
+    ``beta.AccumulateNode`` (the network node) — same pattern as
+    ``NccPatternGroup`` vs ``NccGroup`` vs ``NccNode``.
+
+    :param inner: inner pattern whose matching facts are aggregated.
+    :param result_var: dollar-prefixed binding for the result, e.g. ``"$total"``.
+    :param function: accumulation function name: ``"sum"``, ``"count"``, ``"min"``,
+        ``"max"``, or ``"collectList"``.
+    :param bind_var: dollar-prefixed variable bound in *inner* that supplies values
+        to the function, e.g. ``"$amount"``; ``None`` for ``count()``.
+    :param constraint: optional post-accumulation comparison; ``constraint.field``
+        is the result variable name.  ``None`` means always emit.
+    """
+
+    inner: PatternNode
+    result_var: str
+    function: str
+    bind_var: str | None
+    constraint: CompareConstraint | None
+
+
+@dataclass(frozen=True)
 class RuleDecl:
     """A complete rule declaration.
 
@@ -215,7 +241,9 @@ class RuleDecl:
     name: str
     salience: int = 0
     no_loop: bool = False
-    lhs: tuple[PatternNode | NccPatternGroup | ForallNode | OrGroup, ...] = ()
+    lhs: tuple[
+        PatternNode | NccPatternGroup | ForallNode | OrGroup | AccumulateExpr, ...
+    ] = ()
     rhs_src: str = ""
     tags: tuple[Tag, ...] = ()
 

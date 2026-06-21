@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from rete.prl_ast import (
+    AccumulateExpr,
     BindConstraint,
     CompareConstraint,
     ForallNode,
@@ -766,3 +767,66 @@ class TestParseExists:
         assert len(lhs) == 2
         assert isinstance(lhs[1], PatternNode)
         assert lhs[1].exists is True
+
+
+# ===========================================================================
+# Accumulate
+# ===========================================================================
+
+
+def _acc_src(
+    inner="Order($amount: amount)", result="$total: sum($amount)", constraint=""
+):
+    body = f"  accumulate(\n    {inner};\n    {result}"
+    if constraint:
+        body += f";\n    {constraint}"
+    body += "\n  )"
+    return f'rule "r"\nwhen\n{body}\nthen\nend'
+
+
+class TestAccumulateParser:
+    def test_sum_parsed(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        assert isinstance(node, AccumulateExpr)
+        assert node.function == "sum"
+        assert node.result_var == "$total"
+        assert node.bind_var == "$amount"
+
+    def test_count_no_bind_var(self) -> None:
+        node = _parse(_acc_src(result="$n: count()")).rules[0].lhs[0]
+        assert isinstance(node, AccumulateExpr)
+        assert node.function == "count"
+        assert node.bind_var is None
+
+    def test_constraint_none_when_absent(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        assert node.constraint is None
+
+    def test_constraint_parsed(self) -> None:
+        node = _parse(_acc_src(constraint="$total > 1000")).rules[0].lhs[0]
+        assert isinstance(node.constraint, CompareConstraint)
+        assert node.constraint.op == ">"
+        assert node.constraint.rhs == 1000
+
+    def test_result_var_preserved(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        assert node.result_var == "$total"
+
+    def test_inner_pattern_is_pattern_node(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        assert isinstance(node.inner, PatternNode)
+        assert node.inner.type_name == "Order"
+
+    def test_inner_pattern_bindings(self) -> None:
+        node = _parse(_acc_src()).rules[0].lhs[0]
+        binds = [c for c in node.inner.constraints if isinstance(c, BindConstraint)]
+        assert any(b.var == "$amount" and b.field == "amount" for b in binds)
+
+    def test_min_function(self) -> None:
+        node = _parse(_acc_src(result="$m: min($amount)")).rules[0].lhs[0]
+        assert node.function == "min"
+
+    def test_accumulate_is_single_lhs_node(self) -> None:
+        lhs = _parse(_acc_src()).rules[0].lhs
+        assert len(lhs) == 1
+        assert isinstance(lhs[0], AccumulateExpr)

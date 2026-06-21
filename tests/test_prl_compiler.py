@@ -10,10 +10,11 @@ from dataclasses import dataclass, fields as dc_fields
 
 import pytest
 
-from rete.condition import JoinSpec, NccGroup, Pattern
+from rete.condition import AccumulateSpec, JoinSpec, NccGroup, Pattern
 from rete.fact import Fact
 from rete.fact import Token as ReteToken
 from rete.prl_ast import (
+    AccumulateExpr,
     BindConstraint,
     CompareConstraint,
     DeclareDecl,
@@ -25,11 +26,15 @@ from rete.prl_ast import (
     Tag,
 )
 from rete.prl import (
+    _ACCUMULATE_FNS,
+    _compile_accumulate,
     _compile_declare,
     _compile_lhs,
     _compile_pattern,
     _compile_rhs,
+    _has_tag,
     _java_type,
+    _parse_time_offset,
     _resolve_type,
     _strip_dollars,
     load_prl,
@@ -730,3 +735,220 @@ class TestCompileForall:
         ncc = prods[0].lhs[0]
         assert ncc.conditions[0].type_ is types["Order"]
         assert ncc.conditions[1].type_ is types["Approval"]
+
+
+# ===========================================================================
+# CEP metadata
+# ===========================================================================
+
+
+def _make_decl(
+    name: str = "Ev",
+    fields: tuple = (),
+    tags: tuple = (),
+) -> DeclareDecl:
+    return DeclareDecl(name=name, fields=fields, tags=tags)
+
+
+def _field(name: str, *tag_names: str) -> FieldDecl:
+    return FieldDecl(
+        name=name, type_name="float", tags=tuple(Tag(n) for n in tag_names)
+    )
+
+
+class TestCepMeta:
+    def test_role_event_sets_prl_meta(self) -> None:
+        decl = _make_decl(tags=(Tag("role", "event"),))
+        cls = _compile_declare(decl, {})
+        assert cls.__prl_meta__["role"] == "event"
+
+    def test_plain_declare_no_prl_meta(self) -> None:
+        decl = _make_decl()
+        cls = _compile_declare(decl, {})
+        assert not hasattr(cls, "__prl_meta__")
+
+    def test_timestamp_field_stored(self) -> None:
+        decl = _make_decl(
+            fields=(_field("ts", "timestamp"),),
+            tags=(Tag("role", "event"),),
+        )
+        cls = _compile_declare(decl, {})
+        assert cls.__prl_meta__["timestamp_field"] == "ts"
+
+    def test_no_timestamp_field_is_none(self) -> None:
+        decl = _make_decl(tags=(Tag("role", "event"),))
+        cls = _compile_declare(decl, {})
+        assert cls.__prl_meta__["timestamp_field"] is None
+
+    def test_expires_delta_seconds(self) -> None:
+        decl = _make_decl(tags=(Tag("role", "event"), Tag("expires", "30s")))
+        cls = _compile_declare(decl, {})
+        assert cls.__prl_meta__["expires_delta"] == 30.0
+
+    def test_expires_delta_minutes(self) -> None:
+        decl = _make_decl(tags=(Tag("role", "event"), Tag("expires", "5m")))
+        cls = _compile_declare(decl, {})
+        assert cls.__prl_meta__["expires_delta"] == 300.0
+
+    def test_expires_delta_composite(self) -> None:
+        decl = _make_decl(tags=(Tag("role", "event"), Tag("expires", "1h30m")))
+        cls = _compile_declare(decl, {})
+        assert cls.__prl_meta__["expires_delta"] == 5400.0
+
+    def test_duration_field_stored(self) -> None:
+        decl = _make_decl(
+            fields=(_field("dur", "duration"),),
+            tags=(Tag("role", "event"),),
+        )
+        cls = _compile_declare(decl, {})
+        assert cls.__prl_meta__["duration_field"] == "dur"
+
+    def test_no_expires_is_none(self) -> None:
+        decl = _make_decl(tags=(Tag("role", "event"),))
+        cls = _compile_declare(decl, {})
+        assert cls.__prl_meta__["expires_delta"] is None
+
+    def test_expires_without_timestamp_fact_stays(self) -> None:
+        """@expires with no @timestamp → expires_delta set but timestamp_field None."""
+        decl = _make_decl(tags=(Tag("role", "event"), Tag("expires", "10s")))
+        cls = _compile_declare(decl, {})
+        assert cls.__prl_meta__["expires_delta"] == 10.0
+        assert cls.__prl_meta__["timestamp_field"] is None
+
+
+class TestParseTimeOffset:
+    def test_seconds(self) -> None:
+        assert _parse_time_offset("10s") == 10.0
+
+    def test_minutes(self) -> None:
+        assert _parse_time_offset("5m") == 300.0
+
+    def test_hours(self) -> None:
+        assert _parse_time_offset("1h") == 3600.0
+
+    def test_composite(self) -> None:
+        assert _parse_time_offset("1h30m") == 5400.0
+
+    def test_empty_raises(self) -> None:
+        import pytest
+        with pytest.raises(ValueError):
+            _parse_time_offset("")
+
+    def test_no_unit_raises(self) -> None:
+        import pytest
+        with pytest.raises(ValueError):
+            _parse_time_offset("30")
+
+
+class TestHasTag:
+    def test_tag_present(self) -> None:
+        fd = _field("f", "key")
+        assert _has_tag(fd, "key") is True
+
+    def test_tag_absent(self) -> None:
+        fd = _field("f")
+        assert _has_tag(fd, "key") is False
+
+    def test_other_tag_not_matched(self) -> None:
+        fd = _field("f", "timestamp")
+        assert _has_tag(fd, "key") is False
+
+
+# ===========================================================================
+# Accumulate compiler helpers
+# ===========================================================================
+
+
+@dataclass
+class _Order:
+    amount: float
+
+
+def _acc_expr(
+    type_name="Order",
+    constraints=None,
+    result_var="$total",
+    function="sum",
+    bind_var="$amount",
+    constraint=None,
+) -> AccumulateExpr:
+    inner = PatternNode(
+        type_name=type_name,
+        constraints=tuple(constraints or [BindConstraint("$amount", "amount")]),
+        exists=False,
+        fact_var=None,
+        negated=False,
+    )
+    return AccumulateExpr(
+        inner=inner,
+        result_var=result_var,
+        function=function,
+        bind_var=bind_var,
+        constraint=constraint,
+    )
+
+
+_ACC_TYPES = {"Order": _Order}
+
+
+class TestAccumulateFns:
+    def test_sum_fn(self) -> None:
+        assert _ACCUMULATE_FNS["sum"]([1, 2, 3]) == 6
+
+    def test_count_fn(self) -> None:
+        assert _ACCUMULATE_FNS["count"]([1, 2, 3]) == 3
+
+    def test_min_fn(self) -> None:
+        assert _ACCUMULATE_FNS["min"]([3, 1, 2]) == 1
+
+    def test_max_fn(self) -> None:
+        assert _ACCUMULATE_FNS["max"]([3, 1, 2]) == 3
+
+    def test_collect_list_fn(self) -> None:
+        assert _ACCUMULATE_FNS["collectList"]([1, 2]) == [1, 2]
+
+    def test_min_empty_returns_none(self) -> None:
+        assert _ACCUMULATE_FNS["min"]([]) is None
+
+    def test_max_empty_returns_none(self) -> None:
+        assert _ACCUMULATE_FNS["max"]([]) is None
+
+
+class TestAccumulateCompiler:
+    def test_returns_accumulate_spec(self) -> None:
+        spec = _compile_accumulate(_acc_expr(), _ACC_TYPES)
+        assert isinstance(spec, AccumulateSpec)
+
+    def test_inner_pattern_type(self) -> None:
+        spec = _compile_accumulate(_acc_expr(), _ACC_TYPES)
+        assert spec.inner.type_ is _Order
+
+    def test_bind_attr_resolved(self) -> None:
+        spec = _compile_accumulate(_acc_expr(), _ACC_TYPES)
+        assert spec.bind_attr == "amount"
+
+    def test_result_var_stored(self) -> None:
+        spec = _compile_accumulate(_acc_expr(), _ACC_TYPES)
+        assert spec.result_var == "$total"
+
+    def test_count_bind_attr_none(self) -> None:
+        spec = _compile_accumulate(
+            _acc_expr(constraints=[], bind_var=None, function="count"), _ACC_TYPES
+        )
+        assert spec.bind_attr is None
+
+    def test_constraint_none_when_absent(self) -> None:
+        spec = _compile_accumulate(_acc_expr(), _ACC_TYPES)
+        assert spec.constraint is None
+
+    def test_constraint_compiled(self) -> None:
+        acc = _acc_expr(constraint=CompareConstraint("$total", ">", 100))
+        spec = _compile_accumulate(acc, _ACC_TYPES)
+        assert spec.constraint is not None
+        assert spec.constraint(150) is True
+        assert spec.constraint(50) is False
+
+    def test_unknown_bind_var_raises(self) -> None:
+        acc = _acc_expr(bind_var="$missing")
+        with pytest.raises(NameError):
+            _compile_accumulate(acc, _ACC_TYPES)
