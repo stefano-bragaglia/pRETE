@@ -15,12 +15,12 @@ matching over arbitrary Python objects (POPOs — Plain Old Python Objects).
 > directly into the engine via `load_prl()`.  The RETE engine itself is
 > unchanged.
 
-> **v2.5.0 — PRL Extra Features (in progress):** extending PRL with type
-> inheritance (`extends`), metadata tags (`@key`, `@no-loop`, `@role`,
-> `@timestamp`, `@expires`, `@duration`), positional/named constraint shorthand,
-> `import`, `or` disjunction, `forall`, `exists`, CEP event semantics, and
-> `accumulate`.  Engine changes are confined to `exists` (new `ExistsNode`),
-> CEP (`logical_clock`, event expiry), and `accumulate` (new `AccumulateNode`).
+> **v2.5.0 — PRL Extra Features:** ten new PRL language constructs — type
+> inheritance (`extends`), identity keys (`@key`), positional/named constraint
+> shorthand, `@no-loop` tag, `import` / `from … import`, `or` disjunction,
+> `forall`, `exists`, CEP event semantics (`@role`, `@timestamp`, `@expires`),
+> and `accumulate` with built-in aggregation functions.  New engine nodes:
+> `ExistsNode`, `AccumulateNode`; logical clock for CEP.
 
 ## Background
 
@@ -188,7 +188,7 @@ net.add_production(Production(
 ))
 ```
 
-See `src/examples/fraud_detection.py` for a full NCC round-trip example.
+See `src/examples/programmatic/fraud_detection.py` for a full NCC round-trip example.
 
 ### Retraction
 
@@ -266,18 +266,36 @@ objects and hands them to the engine.
 
 ### What PRL supports
 
+#### Core (v2.1.0)
+
 | Construct | Example |
 |---|---|
 | Fact-type declaration | `declare Temperature value: double end` |
 | OOPath pattern | `/Temperature[value >= 80]` |
 | Traditional pattern | `Temperature(value >= 80)` |
-| Fact binding | `$t: /Temperature[value >= 80]` |
-| Field binding | `$v: value` inside `[…]` |
+| Fact binding | `$t: Temperature(value >= 80)` |
+| Field binding | `$v: value` inside a pattern |
 | Cross-fact join | `field == $bound_var` |
-| Single negation | `not /Temperature[value < 0]` |
+| Single negation | `not Temperature(value < 0)` |
 | Conjunctive negation (NCC) | `not ( Pattern1() Pattern2() )` |
 | Rule salience | `salience 10` |
 | RHS helpers | `insert(obj)`, `retract(obj)`, `update(obj)` |
+
+#### Extra features (v2.5.0)
+
+| Construct | Example |
+|---|---|
+| Type inheritance | `declare Dog extends Animal` |
+| Identity key | `@key` before a field in `declare` — custom `__eq__`/`__hash__` |
+| Positional constraints | `Point(0, 0)` — values matched left-to-right by declaration order |
+| Named constraints | `Point(y=0)` — any subset, any order |
+| `@no-loop` tag | `@no-loop` before `rule` — prevents self-re-activation |
+| Python imports | `from myapp.models import Customer` at top of `.prl` file |
+| `or` disjunction | `PatternA() or PatternB()` — compiler expands to N productions |
+| `forall` | `forall(Order(status=="pending"), Approval(orderId==$o.id))` |
+| `exists` | `exists Invoice(overdue == true)` — fires once per left context |
+| `@role(event)` / `@timestamp` / `@expires` | CEP — events expire automatically after `advance_clock(t)` |
+| `accumulate` | `accumulate(Order($a: amount); $total: sum($a); $total > 1000)` |
 
 ### Quick start
 
@@ -317,23 +335,104 @@ engine.add_fact(Fact(Temperature(sensor="S1", value=95.0)))
 engine.run()
 ```
 
+### v2.5.0 feature examples
+
+**Type inheritance** — a rule on the parent type fires for child facts:
+
+```
+declare Animal  name: String  end
+declare Dog extends Animal  breed: String  end
+
+rule "greet animal"
+when
+  $a: Animal()
+then
+  greet(a)
+end
+```
+
+**`exists`** — fires once per account regardless of how many overdue invoices exist:
+
+```
+rule "alert account"
+when
+  $acc: Account()
+  exists Invoice(accountId == $acc.id, overdue == true)
+then
+  alert(acc)
+end
+```
+
+**`accumulate`** — aggregate and constrain in the LHS:
+
+```
+rule "flag high spend"
+when
+  accumulate(
+    Order($amount: amount);
+    $total: sum($amount);
+    $total > 1000
+  )
+then
+  results.append(total)
+end
+```
+
+**CEP** — events expire automatically after the logical clock advances:
+
+```
+@role(event)
+@expires(30s)
+declare StockTick
+  @timestamp
+  ts: float
+  symbol: String
+  price: float
+end
+```
+
+```python
+engine.add_fact(Fact(StockTick(ts=0.0, symbol="ACME", price=42.0)))
+engine.advance_clock(31.0)   # tick expired — retracted before next run()
+engine.run()
+```
+
 The grammar is documented in [`reference/prl-grammar.ebnf`](reference/prl-grammar.ebnf).
 
 ---
 
 ## Bundled examples
 
-```bash
-# Doorenbos classics (v2.0 rewrite with @dataclass facts)
-python src/examples/blocks_world.py      # §2.1 — three-pattern join
-python src/examples/negation.py          # §2.7 — negated condition
-python src/examples/sharing.py           # §2.3 — two productions sharing a beta node
+Examples are split into two folders:
 
-# Non-trivial examples (v2.0)
-python src/examples/loan_application.py  # update_fact; cross-fact binding; _approved guard
-python src/examples/temperature_alarm.py # pure alpha test; RHS inserts new facts
-python src/examples/family_tree.py       # transitive inference via forward chaining
-python src/examples/fraud_detection.py   # NccGroup; retraction round-trip
+```bash
+# src/examples/programmatic/ — pure Python, no .prl files
+python src/examples/programmatic/blocks_world.py      # §2.1 — three-pattern join
+python src/examples/programmatic/negation.py          # §2.7 — negated condition
+python src/examples/programmatic/sharing.py           # §2.3 — two productions sharing a beta node
+python src/examples/programmatic/loan_application.py  # update_fact; cross-fact binding
+python src/examples/programmatic/temperature_alarm.py # alpha test; RHS inserts new facts
+python src/examples/programmatic/family_tree.py       # transitive inference
+python src/examples/programmatic/fraud_detection.py   # NccGroup; retraction round-trip
+
+# src/examples/declarative/ — load rules from .prl files in declarative/prl/
+python src/examples/declarative/blocks_world_prl.py      # PRL equivalent of blocks_world
+python src/examples/declarative/negation_prl.py
+python src/examples/declarative/sharing_prl.py
+python src/examples/declarative/loan_application_prl.py
+python src/examples/declarative/temperature_alarm_prl.py
+python src/examples/declarative/family_tree_prl.py
+python src/examples/declarative/fraud_detection_prl.py
+python src/examples/declarative/inheritance_prl.py       # ES-1: extends
+python src/examples/declarative/identity_key_prl.py      # ES-3: @key
+python src/examples/declarative/compact_patterns_prl.py  # ES-4: positional/named constraints
+python src/examples/declarative/self_modify_prl.py       # ES-2: @no-loop
+python src/examples/declarative/imported_types_prl.py    # ES-5: import
+python src/examples/declarative/disjunction_prl.py       # ES-6: or
+python src/examples/declarative/universal_prl.py         # ES-6: forall
+python src/examples/declarative/existence_check_prl.py   # ES-7: exists
+python src/examples/declarative/event_stream_prl.py      # ES-8: CEP
+python src/examples/declarative/aggregation_prl.py       # ES-9: accumulate
 ```
 
 ---
@@ -354,6 +453,7 @@ pytest --cov
 ---
 
 ## History
+- **v2.5.0** — ten PRL language extensions: `extends`, `@key`, positional/named constraints, `@no-loop` tag, `import`, `or`/`forall`, `exists`, CEP (`@role`/`@timestamp`/`@expires`), `accumulate`; new `ExistsNode` and `AccumulateNode` beta nodes; logical clock; examples reorganised into `declarative/` and `programmatic/`
 - **v2.1.0** — PRL parser: `load_prl()`, `.prl` files, lexer / AST / compiler pipeline
 - **v2.0.0** — Drools-style POPO matching: `Fact`, `Pattern`, `JoinSpec`; `update_fact`; MRO dispatch; named variable bindings on `Token`
 - **v1.0.1** — incremental fixes
