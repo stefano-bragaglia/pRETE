@@ -3,18 +3,24 @@
 A pure-Python implementation of the Rete algorithm for production rule systems,
 matching over arbitrary Python objects (POPOs — Plain Old Python Objects).
 
-<table>
-<tr>
-<td align="center" valign="middle">
-<img src="images/pRETE-logo-small.png" alt="pRETE logo"/>
-</td>
-<td valign="top">
-<blockquote><strong>v2.0.0 breaking change:</strong> the <code>(id, attribute, value)</code> triple model has been replaced by Drools-style pattern matching over <code>@dataclass</code> objects. <code>WME</code>, <code>Condition</code>, and <code>WILDCARD</code> are removed; use <code>Fact</code>, <code>Pattern</code>, and <code>JoinSpec</code> instead. See <a href="CHANGELOG.md">CHANGELOG.md</a>.</blockquote>
-<blockquote><strong>v2.1.0 — pRETE Rule Language (PRL):</strong> rules can now be written in <code>.prl</code> text files (a Python-flavoured subset of Drools Rule Language) and loaded directly into the engine via <code>load_prl()</code>. The RETE engine itself is unchanged.</blockquote>
-<blockquote><strong>v2.5.0 — PRL Extra Features:</strong> extending PRL with type inheritance (<code>extends</code>), metadata tags (<code>@key</code>, <code>@no-loop</code>, <code>@role</code>, <code>@timestamp</code>, <code>@expires</code>, <code>@duration</code>), positional/named constraint shorthand, <code>import</code>, <code>or</code> disjunction, <code>forall</code>, <code>exists</code>, CEP event semantics, and <code>accumulate</code>.</blockquote>
-</td>
-</tr>
-</table>
+> **v2.0.0 breaking change:** the `(id, attribute, value)` triple model has
+> been replaced by Drools-style pattern matching over `@dataclass` objects.
+> `WME`, `Condition`, and `WILDCARD` are removed; use `Fact`, `Pattern`, and
+> `JoinSpec` instead.  See [CHANGELOG.md](CHANGELOG.md).
+
+> **v2.1.0 — pRETE Rule Language (PRL):** rules can now be written in `.prl`
+> text files (a Python-flavoured subset of Drools Rule Language) and loaded
+> directly into the engine via `load_prl()`.  The RETE engine itself is
+> unchanged.
+
+> **v2.5.0 — PRL Extra Features (in progress):** extending PRL with type
+> inheritance (`extends`), metadata tags (`@key`, `@no-loop`, `@role`,
+> `@timestamp`, `@expires`, `@duration`), positional/named constraint shorthand,
+> `import`, `or` disjunction, `forall`, `exists`, CEP event semantics, and
+> `accumulate`.  Engine changes are confined to `exists` (new `ExistsNode`),
+> CEP (`logical_clock`, event expiry), and `accumulate` (new `AccumulateNode`).
+
+![pRETE logo](images/pRETE-logo-small.png)
 
 ## Background
 
