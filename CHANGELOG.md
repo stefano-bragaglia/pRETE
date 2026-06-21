@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.1] — 2026-06-21
+
+**Test coverage.**
+
+### Changed
+- Test suite expanded from 59 missed lines to 11 (99.17% coverage); remaining
+  11 misses are intentional (error-raising guards and structural dead code).
+
+---
+
 ## [2.5.0] — 2026-06-21
 
 **Extending API change — PRL extra features.**
