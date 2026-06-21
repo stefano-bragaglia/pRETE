@@ -3,10 +3,33 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "RETE"
-version = "2.5.0"
-description = ""
+name = "prete"
+version = "2.5.1"
+description = "Pure-Python implementation of the Rete algorithm for production rule systems"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "Stefano Bragaglia", email = "stefano-bragaglia@users.noreply.github.com"}]
+keywords = ["rete", "rules", "expert-system", "production-rules", "inference", "pattern-matching", "rule-engine"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/stefano-bragaglia/pRETE"
+Source = "https://github.com/stefano-bragaglia/pRETE"
+Changelog = "https://github.com/stefano-bragaglia/pRETE/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
@@ -15,7 +38,7 @@ dev = [
     "radon ==6.0.1",
     "ruff ==0.15.18",
     "xenon ==0.9.3",
-    "RETE",
+    "prete",
 ]
 
 [tool.hatch.build.targets.wheel]

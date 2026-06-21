@@ -3,7 +3,12 @@
 A pure-Python implementation of the Rete algorithm for production rule systems,
 matching over arbitrary Python objects (POPOs — Plain Old Python Objects).
 
-![pRETE logo](images/pRETE-logo-small.png)
+![pRETE logo](https://raw.githubusercontent.com/stefano-bragaglia/pRETE/main/images/pRETE-logo-small.png)
+
+[![CI](https://github.com/stefano-bragaglia/pRETE/actions/workflows/ci.yml/badge.svg)](https://github.com/stefano-bragaglia/pRETE/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/prete)](https://pypi.org/project/prete/)
+[![Python versions](https://img.shields.io/pypi/pyversions/prete)](https://pypi.org/project/prete/)
+[![License](https://img.shields.io/github/license/stefano-bragaglia/pRETE)](LICENSE)
 
 > **v2.0.0 breaking change:** the `(id, attribute, value)` triple model has
 > been replaced by Drools-style pattern matching over `@dataclass` objects.
@@ -40,7 +45,13 @@ are named and carried in the token.
 ## Install
 
 ```bash
-pip install -e .[dev]
+pip install prete
+```
+
+For development:
+
+```bash
+pip install -e ".[dev]"
 ```
 
 ---
@@ -453,6 +464,7 @@ pytest --cov
 ---
 
 ## History
+- **v2.5.1** — test suite expanded to 99%+ coverage
 - **v2.5.0** — ten PRL language extensions: `extends`, `@key`, positional/named constraints, `@no-loop` tag, `import`, `or`/`forall`, `exists`, CEP (`@role`/`@timestamp`/`@expires`), `accumulate`; new `ExistsNode` and `AccumulateNode` beta nodes; logical clock; examples reorganised into `declarative/` and `programmatic/`
 - **v2.1.0** — PRL parser: `load_prl()`, `.prl` files, lexer / AST / compiler pipeline
 - **v2.0.0** — Drools-style POPO matching: `Fact`, `Pattern`, `JoinSpec`; `update_fact`; MRO dispatch; named variable bindings on `Token`
