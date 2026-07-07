@@ -10,6 +10,7 @@ import pytest
 from rete.prl_ast import (
     BindConstraint,
     CompareConstraint,
+    ContainerLiteral,
     DeclareDecl,
     FieldDecl,
     ForallNode,
@@ -90,6 +91,77 @@ class TestFieldDecl:
     def test_hashable(self) -> None:
         fd = FieldDecl("age", "int")
         assert hash(fd) == hash(FieldDecl("age", "int"))
+
+    def test_no_default_by_default(self) -> None:
+        fd = FieldDecl("value", "float")
+        assert fd.has_default is False
+        assert fd.default is None
+
+    def test_construction_with_scalar_default(self) -> None:
+        fd = FieldDecl("name", "str", has_default=True, default="unknown")
+        assert fd.has_default is True
+        assert fd.default == "unknown"
+
+    def test_explicit_none_default_distinguishable_from_no_default(self) -> None:
+        # 5-declare-field-defaults story 2: `= null` (has_default=True,
+        # default=None) must be distinguishable from no `=` clause at all
+        # (has_default=False, default=None) — both leave .default as None.
+        explicit = FieldDecl("stage", "str", has_default=True, default=None)
+        absent = FieldDecl("stage", "str")
+        assert explicit.has_default is True
+        assert absent.has_default is False
+        assert explicit != absent
+
+    def test_hashable_with_container_default(self) -> None:
+        # A ContainerLiteral default must not break FieldDecl's hashability
+        # (it must stay tuple-based internally, not a raw mutable list/dict).
+        fd = FieldDecl(
+            "items", "list[str]",
+            has_default=True, default=ContainerLiteral("list", ()),
+        )
+        assert hash(fd) == hash(FieldDecl(
+            "items", "list[str]",
+            has_default=True, default=ContainerLiteral("list", ()),
+        ))
+
+
+# ===========================================================================
+# ContainerLiteral (5-declare-field-defaults story 2)
+# ===========================================================================
+
+class TestContainerLiteral:
+    """``ContainerLiteral`` represents a ``[]``/``{}`` default, frozen+hashable."""
+
+    def test_empty_list(self) -> None:
+        cl = ContainerLiteral("list", ())
+        assert cl.kind == "list"
+        assert cl.elements == ()
+
+    def test_nonempty_list(self) -> None:
+        cl = ContainerLiteral("list", (1, 2, 3))
+        assert cl.elements == (1, 2, 3)
+
+    def test_empty_dict(self) -> None:
+        cl = ContainerLiteral("dict", ())
+        assert cl.elements == ()
+
+    def test_nonempty_dict_stores_key_value_pairs(self) -> None:
+        cl = ContainerLiteral("dict", (("a", 1),))
+        assert cl.elements == (("a", 1),)
+
+    def test_frozen(self) -> None:
+        cl = ContainerLiteral("list", ())
+        with pytest.raises(AttributeError):
+            cl.kind = "dict"  # type: ignore[misc]
+
+    def test_structural_equality(self) -> None:
+        assert ContainerLiteral("list", (1, 2)) == ContainerLiteral("list", (1, 2))
+        assert ContainerLiteral("list", ()) != ContainerLiteral("dict", ())
+
+    def test_hashable(self) -> None:
+        assert hash(ContainerLiteral("list", (1, 2))) == hash(
+            ContainerLiteral("list", (1, 2))
+        )
 
 
 # ===========================================================================

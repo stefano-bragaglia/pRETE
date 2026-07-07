@@ -80,6 +80,26 @@ class TestDeclare:
         obj = types["Dataset"](tags=["a", "b"], totals={"x": 1})
         assert obj.tags == ["a", "b"]
 
+    def test_field_default_end_to_end(self) -> None:
+        # pRETE#1's exact repro: incremental construction with just the
+        # identifying field, the rest filled in later.
+        src = (
+            "declare Dataset\n"
+            "  stem: str\n"
+            "  stage: str = null\n"
+            "  remediation_history: list[str] = []\n"
+            "end"
+        )
+        _, types = _setup(src)
+        obj = types["Dataset"](stem="ds")
+        assert obj.stem == "ds"
+        assert obj.stage is None
+        assert obj.remediation_history == []
+        # mutable default isn't shared across instances
+        other = types["Dataset"](stem="ds2")
+        obj.remediation_history.append("event")
+        assert other.remediation_history == []
+
 
 # ===========================================================================
 # OOPath patterns

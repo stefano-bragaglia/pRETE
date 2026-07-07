@@ -17,6 +17,7 @@ from rete.prl_ast import (
     AccumulateExpr,
     BindConstraint,
     CompareConstraint,
+    ContainerLiteral,
     DeclareDecl,
     FieldDecl,
     NamedConstraint,
@@ -174,6 +175,165 @@ class TestCompileDeclare:
         decl = DeclareDecl("Box", (FieldDecl("rows", "list[dict[str, int]]"),))
         cls = _compile_declare(decl, {})
         assert dc_fields(cls)[0].type == list[dict[str, int]]
+
+
+# ===========================================================================
+# Declare compilation — field defaults (5-declare-field-defaults story 2)
+# ===========================================================================
+
+class TestCompileDeclareDefaults:
+    """``_compile_declare`` honours ``FieldDecl.has_default``/``.default``.
+
+    Default-value syntax mirrors Python's own ``@dataclass``: scalar
+    literals compile to ``field(default=...)``; mutable container literals
+    (``[]``/``{}``) compile to ``field(default_factory=...)`` transparently,
+    so instances never alias a shared list/dict. Field-ordering violations
+    are expected to surface as the *native* ``TypeError`` that
+    ``dataclasses``/``make_dataclass`` already raises — no custom validation
+    is required, verified separately below.
+    """
+
+    def test_none_default_applied(self) -> None:
+        decl = DeclareDecl(
+            "Dataset",
+            (
+                FieldDecl("stem", "str"),
+                FieldDecl("stage", "str", has_default=True, default=None),
+            ),
+        )
+        cls = _compile_declare(decl, {})
+        assert cls(stem="ds").stage is None
+
+    def test_scalar_default_applied(self) -> None:
+        decl = DeclareDecl(
+            "Customer",
+            (FieldDecl("customerId", "str", has_default=True, default="unknown"),),
+        )
+        cls = _compile_declare(decl, {})
+        assert cls().customerId == "unknown"
+
+    def test_list_default_creates_independent_instances(self) -> None:
+        decl = DeclareDecl(
+            "Dataset",
+            (
+                FieldDecl("stem", "str"),
+                FieldDecl(
+                    "remediation_history", "list[str]",
+                    has_default=True, default=ContainerLiteral("list", ()),
+                ),
+            ),
+        )
+        cls = _compile_declare(decl, {})
+        a, b = cls(stem="a"), cls(stem="b")
+        assert a.remediation_history is not b.remediation_history
+        a.remediation_history.append("x")
+        assert b.remediation_history == []
+
+    def test_nonempty_list_default_contents(self) -> None:
+        decl = DeclareDecl(
+            "Score",
+            (FieldDecl(
+                "values", "list[int]",
+                has_default=True, default=ContainerLiteral("list", (1, 2, 3)),
+            ),),
+        )
+        cls = _compile_declare(decl, {})
+        assert cls().values == [1, 2, 3]
+
+    def test_dict_default_creates_independent_instances(self) -> None:
+        decl = DeclareDecl(
+            "Dataset",
+            (FieldDecl(
+                "metrics", "dict[str, int]",
+                has_default=True, default=ContainerLiteral("dict", ()),
+            ),),
+        )
+        cls = _compile_declare(decl, {})
+        a, b = cls(), cls()
+        assert a.metrics is not b.metrics
+        a.metrics["x"] = 1
+        assert b.metrics == {}
+
+    def test_nonempty_dict_default_contents(self) -> None:
+        decl = DeclareDecl(
+            "Dataset",
+            (FieldDecl(
+                "metrics", "dict[str, int]",
+                has_default=True, default=ContainerLiteral("dict", (("a", 1),)),
+            ),),
+        )
+        cls = _compile_declare(decl, {})
+        assert cls().metrics == {"a": 1}
+
+    def test_field_ordering_violation_same_declare_raises(self) -> None:
+        decl = DeclareDecl(
+            "Bad",
+            (
+                FieldDecl("a", "str", has_default=True, default="x"),
+                FieldDecl("b", "str"),
+            ),
+        )
+        with pytest.raises(TypeError):
+            _compile_declare(decl, {})
+
+    def test_field_ordering_violation_across_extends_raises(self) -> None:
+        parent_decl = DeclareDecl(
+            "Parent", (FieldDecl("p", "str", has_default=True, default="x"),),
+        )
+        parent_cls = _compile_declare(parent_decl, {})
+        child_decl = DeclareDecl(
+            "Child", (FieldDecl("c", "str"),), extends="Parent",
+        )
+        with pytest.raises(TypeError):
+            _compile_declare(child_decl, {"Parent": parent_cls})
+
+    def test_field_ordering_violation_across_external_types_parent_raises(
+        self,
+    ) -> None:
+        # Parent is a hand-written @dataclass supplied via types=, not
+        # produced by _compile_declare — the ordering check must still
+        # catch this via the external class's own actual fields.
+        @dataclass
+        class _ExternalDefaulted:
+            p: str = "x"
+
+        child_decl = DeclareDecl(
+            "Child", (FieldDecl("c", "str"),), extends="ExternalDefaulted",
+        )
+        with pytest.raises(TypeError):
+            _compile_declare(child_decl, {"ExternalDefaulted": _ExternalDefaulted})
+
+    def test_key_field_with_default_compiles_and_compares_equal(self) -> None:
+        decl = DeclareDecl(
+            "Customer",
+            (FieldDecl(
+                "customerId", "str", tags=(Tag("key"),),
+                has_default=True, default="unknown",
+            ),),
+        )
+        cls = _compile_declare(decl, {})
+        assert cls() == cls()
+
+    def test_incremental_construction_only_identifying_field_required(self) -> None:
+        # The exact shape of pRETE#1's repro: create with just the
+        # identifying field, fill in the rest later via attribute
+        # assignment or update_fact.
+        decl = DeclareDecl(
+            "Dataset",
+            (
+                FieldDecl("stem", "str"),
+                FieldDecl("stage", "str", has_default=True, default=None),
+                FieldDecl(
+                    "remediation_history", "list[str]",
+                    has_default=True, default=ContainerLiteral("list", ()),
+                ),
+            ),
+        )
+        cls = _compile_declare(decl, {})
+        obj = cls(stem="ds")
+        assert obj.stem == "ds"
+        assert obj.stage is None
+        assert obj.remediation_history == []
 
 
 # ===========================================================================
