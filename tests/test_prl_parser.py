@@ -12,6 +12,7 @@ from rete.prl_ast import (
     AccumulateExpr,
     BindConstraint,
     CompareConstraint,
+    ContainerLiteral,
     ForallNode,
     NamedConstraint,
     NccPatternGroup,
@@ -131,10 +132,130 @@ class TestParseDeclare:
         dd = _parse("declare Marker\n  @deprecated\nend").declares[0]
         assert dd.fields == ()
 
-    def test_generic_type_name_stripped(self) -> None:
-        # lines 185, 189-196: Java-style generic in field type is skipped
-        dd = _parse("declare Box\n  items: List<String>\nend").declares[0]
-        assert dd.fields[0].type_name == "List"
+    def test_bracket_generic_stored_verbatim(self) -> None:
+        # 5-declare-field-defaults story 1: Python-bracket generics replace
+        # the old Java-diamond form; the type expression is preserved (not
+        # erased) for the compiler to resolve.
+        dd = _parse("declare Box\n  items: list[str]\nend").declares[0]
+        assert dd.fields[0].type_name == "list[str]"
+
+    def test_bracket_generic_multiple_params(self) -> None:
+        dd = _parse("declare Box\n  totals: dict[str, int]\nend").declares[0]
+        assert dd.fields[0].type_name == "dict[str, int]"
+
+    def test_bracket_generic_normalises_spacing(self) -> None:
+        dd = _parse("declare Box\n  totals: dict[str,int]\nend").declares[0]
+        assert dd.fields[0].type_name == "dict[str, int]"
+
+    def test_nested_bracket_generic(self) -> None:
+        dd = _parse(
+            "declare Box\n  rows: list[dict[str, int]]\nend"
+        ).declares[0]
+        assert dd.fields[0].type_name == "list[dict[str, int]]"
+
+    def test_diamond_generic_no_longer_parses(self) -> None:
+        # Java-style List<String> is rejected outright, not silently
+        # erased to "List" as it was before this story.
+        with pytest.raises(SyntaxError):
+            _parse("declare Box\n  items: List<String>\nend")
+
+    def test_unbalanced_bracket_generic_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse("declare Box\n  items: list[str\nend")
+
+    def test_empty_bracket_generic_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse("declare Box\n  items: list[]\nend")
+
+    def test_trailing_comma_bracket_generic_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse("declare Box\n  items: dict[str,]\nend")
+
+    # -- field defaults (5-declare-field-defaults story 2) --------------
+
+    def test_no_default_leaves_has_default_false(self) -> None:
+        fd = _parse("declare Temp\n  value: float\nend").declares[0].fields[0]
+        assert fd.has_default is False
+        assert fd.default is None
+
+    def test_none_default(self) -> None:
+        fd = _parse("declare Dataset\n  stage: str = null\nend").declares[0].fields[0]
+        assert fd.has_default is True
+        assert fd.default is None
+
+    def test_string_default(self) -> None:
+        fd = _parse(
+            'declare Customer\n  customerId: str = "unknown"\nend'
+        ).declares[0].fields[0]
+        assert fd.has_default is True
+        assert fd.default == "unknown"
+
+    def test_int_default(self) -> None:
+        fd = _parse("declare Score\n  value: int = 0\nend").declares[0].fields[0]
+        assert fd.default == 0
+
+    def test_negative_int_default(self) -> None:
+        fd = _parse("declare Score\n  value: int = -1\nend").declares[0].fields[0]
+        assert fd.default == -1
+
+    def test_float_default(self) -> None:
+        fd = _parse("declare Temp\n  value: float = 0.0\nend").declares[0].fields[0]
+        assert fd.default == 0.0
+
+    def test_bool_default(self) -> None:
+        fd = _parse("declare Flag\n  active: bool = true\nend").declares[0].fields[0]
+        assert fd.default is True
+
+    def test_empty_list_default(self) -> None:
+        fd = _parse(
+            "declare Dataset\n  remediation_history: list[str] = []\nend"
+        ).declares[0].fields[0]
+        assert fd.has_default is True
+        assert fd.default == ContainerLiteral("list", ())
+
+    def test_nonempty_list_default(self) -> None:
+        fd = _parse(
+            "declare Score\n  values: list[int] = [1, 2, 3]\nend"
+        ).declares[0].fields[0]
+        assert fd.default == ContainerLiteral("list", (1, 2, 3))
+
+    def test_empty_dict_default(self) -> None:
+        fd = _parse(
+            "declare Dataset\n  metrics: dict[str, int] = {}\nend"
+        ).declares[0].fields[0]
+        assert fd.default == ContainerLiteral("dict", ())
+
+    def test_nonempty_dict_default(self) -> None:
+        fd = _parse(
+            'declare Dataset\n  metrics: dict[str, int] = {"a": 1}\nend'
+        ).declares[0].fields[0]
+        assert fd.default == ContainerLiteral("dict", (("a", 1),))
+
+    def test_multiple_fields_mixed_defaults(self) -> None:
+        fields = _parse(
+            "declare Dataset\n"
+            "  stem: str\n"
+            "  stage: str = null\n"
+            "  remediation_history: list[str] = []\n"
+            "end"
+        ).declares[0].fields
+        assert fields[0].has_default is False
+        assert fields[1].default is None
+        assert fields[2].default == ContainerLiteral("list", ())
+
+    def test_unterminated_list_default_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse("declare Dataset\n  items: list[int] = [1, 2\nend")
+
+    def test_dict_default_missing_colon_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse('declare Dataset\n  metrics: dict[str, int] = {"a" 1}\nend')
+
+    def test_default_references_variable_rejected(self) -> None:
+        # Defaults are compile-time constants only — a $var reference is
+        # not a valid default-value token (VAR is never a value_expr here).
+        with pytest.raises(SyntaxError):
+            _parse("declare Dataset\n  stage: str = $x\nend")
 
 
 # ===========================================================================

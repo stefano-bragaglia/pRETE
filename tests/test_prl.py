@@ -69,6 +69,37 @@ class TestDeclare:
         obj = types["Outer"](inner=types["Inner"](x=5))
         assert obj.inner.x == 5
 
+    def test_bracket_generic_field(self) -> None:
+        # 5-declare-field-defaults story 1: Python-bracket generics
+        # (replacing the old, erased Java-diamond form) end-to-end.
+        src = "declare Dataset\n  tags: list[str]\n  totals: dict[str, int]\nend"
+        _, types = _setup(src)
+        flds = dc_fields(types["Dataset"])
+        assert flds[0].type == list[str]
+        assert flds[1].type == dict[str, int]
+        obj = types["Dataset"](tags=["a", "b"], totals={"x": 1})
+        assert obj.tags == ["a", "b"]
+
+    def test_field_default_end_to_end(self) -> None:
+        # pRETE#1's exact repro: incremental construction with just the
+        # identifying field, the rest filled in later.
+        src = (
+            "declare Dataset\n"
+            "  stem: str\n"
+            "  stage: str = null\n"
+            "  remediation_history: list[str] = []\n"
+            "end"
+        )
+        _, types = _setup(src)
+        obj = types["Dataset"](stem="ds")
+        assert obj.stem == "ds"
+        assert obj.stage is None
+        assert obj.remediation_history == []
+        # mutable default isn't shared across instances
+        other = types["Dataset"](stem="ds2")
+        obj.remediation_history.append("event")
+        assert other.remediation_history == []
+
 
 # ===========================================================================
 # OOPath patterns

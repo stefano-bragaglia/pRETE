@@ -9,6 +9,7 @@ from rete.prl_ast import (
     AccumulateExpr,
     BindConstraint,
     CompareConstraint,
+    ContainerLiteral,
     DeclareDecl,
     FieldDecl,
     ForallNode,
@@ -177,23 +178,98 @@ class Parser:
         name = self._expect("IDENT").value
         self._expect("PUNCT", ":")
         type_name = self._parse_type_ref()
-        return FieldDecl(name, type_name, tags)
+        has_default, default = self._parse_optional_default()
+        return FieldDecl(name, type_name, tags, has_default, default)
+
+    def _parse_optional_default(
+        self,
+    ) -> tuple[bool, None | bool | int | float | str | ContainerLiteral]:
+        """Parse an optional ``'=' default_value`` clause after a field's type.
+
+        :returns: ``(has_default, default)`` — ``(False, None)`` when no
+            ``=`` clause is present.
+        """
+        if not self._peek_op("="):
+            return False, None
+        self._advance()
+        return True, self._parse_default_value()
+
+    def _parse_default_value(
+        self,
+    ) -> None | bool | int | float | str | ContainerLiteral:
+        """Parse one default-value token: a scalar literal, or a ``[]``/
+        ``{}`` container literal (each element parsed the same way, so
+        nesting works for free without extra handling).
+
+        Deliberately does not accept a ``$var`` reference — a default must
+        be a compile-time constant, not a runtime binding.
+        """
+        if self._peek_punct("["):
+            return self._parse_list_literal()
+        if self._peek_punct("{"):
+            return self._parse_dict_literal()
+        if self._peek_kind("STRING"):
+            return self._advance().value[1:-1]
+        return self._parse_literal()
+
+    def _parse_list_literal(self) -> ContainerLiteral:
+        self._expect("PUNCT", "[")
+        elements: list = []
+        if not self._peek_punct("]"):
+            elements.append(self._parse_default_value())
+            while self._peek_punct(","):
+                self._advance()
+                elements.append(self._parse_default_value())
+        self._expect("PUNCT", "]")
+        return ContainerLiteral("list", tuple(elements))
+
+    def _parse_dict_literal(self) -> ContainerLiteral:
+        self._expect("PUNCT", "{")
+        pairs: list = []
+        if not self._peek_punct("}"):
+            pairs.append(self._parse_dict_pair())
+            while self._peek_punct(","):
+                self._advance()
+                pairs.append(self._parse_dict_pair())
+        self._expect("PUNCT", "}")
+        return ContainerLiteral("dict", tuple(pairs))
+
+    def _parse_dict_pair(self) -> tuple:
+        key = self._parse_default_value()
+        self._expect("PUNCT", ":")
+        value = self._parse_default_value()
+        return (key, value)
 
     def _parse_type_ref(self) -> str:
+        """Parse a type name, optionally followed by Python-bracket generic
+        parameters (``list[str]``, ``dict[str, int]``, arbitrarily nested).
+
+        Returns the type expression exactly as written (whitespace
+        normalised), for the compiler to resolve. Java-style diamond
+        generics (``List<String>``) are no longer accepted here — a bare
+        ``<`` after the type name is simply not consumed, so it surfaces as
+        an unexpected token to the caller.
+        """
         name = self._expect("IDENT").value
-        if self._peek_op("<"):
-            self._skip_generic()
+        if self._peek_punct("["):
+            name = f"{name}[{self._parse_type_params()}]"
         return name
 
-    def _skip_generic(self) -> None:
-        self._advance()  # consume '<'
-        depth = 1
-        while depth > 0:
-            t = self._advance()
-            if t.value == "<":
-                depth += 1
-            elif t.value == ">":
-                depth -= 1
+    def _parse_type_params(self) -> str:
+        """Parse ``'[' type_ref (',' type_ref)* ']'``; return the joined,
+        comma-space-normalised parameter text (brackets excluded).
+
+        :raises SyntaxError: on an empty parameter list, a trailing comma,
+            or a missing closing ``]`` — all via the underlying ``_expect``
+            calls' own error reporting.
+        """
+        self._expect("PUNCT", "[")
+        params = [self._parse_type_ref()]
+        while self._peek_punct(","):
+            self._advance()
+            params.append(self._parse_type_ref())
+        self._expect("PUNCT", "]")
+        return ", ".join(params)
 
     # ------------------------------------------------------------------
     # Rules and attributes

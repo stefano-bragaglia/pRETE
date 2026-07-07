@@ -18,11 +18,13 @@ The compiler has three sub-tasks:
 """
 from __future__ import annotations
 
+import builtins
 import importlib
 import operator
 import re
 import textwrap
-from dataclasses import make_dataclass
+from dataclasses import field, make_dataclass
+from functools import partial
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Callable
 
@@ -32,6 +34,7 @@ from rete.prl_ast import (
     AccumulateExpr,
     BindConstraint,
     CompareConstraint,
+    ContainerLiteral,
     DeclareDecl,
     FieldDecl,
     ForallNode,
@@ -207,7 +210,7 @@ def _compile_declare(decl: DeclareDecl, types: dict[str, type]) -> type:
     :param types: current type mapping (may include previously declared types).
     :returns: a new mutable dataclass class (not frozen — supports ``update``).
     """
-    fields = [(fd.name, _java_type(fd.type_name, types)) for fd in decl.fields]
+    fields = [_field_spec(fd, types) for fd in decl.fields]
     key_names = _key_fields(decl)
     kwargs: dict = {"eq": False} if key_names else {}
     if decl.extends:
@@ -219,6 +222,44 @@ def _compile_declare(decl: DeclareDecl, types: dict[str, type]) -> type:
         _inject_key_eq(cls, key_names)
     _attach_event_meta(cls, decl)
     return cls
+
+
+def _field_spec(fd: FieldDecl, types: dict[str, type]) -> tuple:
+    """Build one ``make_dataclass`` field entry, honouring a default.
+
+    Field-ordering violations (a non-defaulted field after a defaulted one,
+    including across ``extends``/an externally-supplied ``types=`` parent)
+    are not checked here — ``make_dataclass`` already raises the same
+    ``TypeError`` Python's own ``@dataclass`` raises, so no separate
+    validation is needed.
+
+    :param fd: the field declaration.
+    :param types: current type mapping, for resolving ``fd.type_name``.
+    :returns: ``(name, type)`` with no default, or ``(name, type,
+        dataclasses.field(...))`` when ``fd.has_default`` is set.
+    """
+    py_type = _java_type(fd.type_name, types)
+    if not fd.has_default:
+        return fd.name, py_type
+    return fd.name, py_type, _default_field(fd.default)
+
+
+def _default_field(
+    default: None | bool | int | float | str | ContainerLiteral,
+):
+    """Return a ``dataclasses.field(...)`` for a parsed default value.
+
+    A :class:`ContainerLiteral` becomes ``default_factory`` — a fresh
+    list/dict built per instance, never a shared, aliased default (the
+    classic Python mutable-default-argument bug). Any other (immutable)
+    value becomes a plain ``default``.
+
+    :param default: a scalar literal or a :class:`ContainerLiteral`.
+    """
+    if isinstance(default, ContainerLiteral):
+        ctor = list if default.kind == "list" else dict
+        return field(default_factory=partial(ctor, default.elements))
+    return field(default=default)
 
 
 def _key_fields(decl: DeclareDecl) -> tuple[str, ...]:
@@ -320,15 +361,86 @@ def _inject_key_eq(cls: type, key_names: tuple[str, ...]) -> None:
 def _java_type(name: str, types: dict[str, type]) -> type:
     """Resolve a PRL type name to a Python type.
 
-    User-declared types take priority over ``_JAVA_TO_PY``.
-    Unknown names fall back to ``typing.Any``.
+    Handles bracket-generic expressions (``list[str]``, ``dict[str, int]``,
+    arbitrarily nested) by resolving the base name and each parameter
+    recursively, then reassembling via native subscription (PEP 585).
 
-    :param name: type name string from a ``FieldDecl``.
+    :param name: type name string from a ``FieldDecl`` — a bare name or a
+        bracket-generic expression exactly as parsed.
+    :param types: current type mapping.
+    """
+    base, params = _split_generic(name)
+    resolved_base = _resolve_base_type(base, types)
+    if not params:
+        return resolved_base
+    resolved_params = tuple(_java_type(p, types) for p in params)
+    return resolved_base[resolved_params]
+
+
+def _resolve_base_type(name: str, types: dict[str, type]) -> type:
+    """Resolve a bare (non-generic) type name to a Python type.
+
+    Resolution order: previously declared/user-supplied types, then the
+    Java-primitive-name alias table, then Python builtins (covers container
+    base names — ``list``, ``dict``, ``set``, ``tuple`` — for bracket-generic
+    expressions), then ``typing.Any`` as the final fallback. Only an actual
+    ``type`` object from ``builtins`` is accepted; a builtin function or
+    module name (e.g. ``print``) falls through to ``Any`` like any other
+    unresolvable name.
+
+    :param name: a single, non-bracketed type name.
     :param types: current type mapping.
     """
     if name in types:
         return types[name]
-    return _JAVA_TO_PY.get(name, Any)
+    if name in _JAVA_TO_PY:
+        return _JAVA_TO_PY[name]
+    candidate = getattr(builtins, name, None)
+    return candidate if isinstance(candidate, type) else Any
+
+
+def _split_generic(expr: str) -> tuple[str, list[str]]:
+    """Split ``"base[p1, p2]"`` into ``("base", ["p1", "p2"])``.
+
+    A bare name (no ``[``) returns ``(expr, [])``. Comma-splitting respects
+    nested brackets, so a param that is itself a bracket-generic expression
+    is kept intact as one entry.
+
+    :param expr: type expression exactly as stored on ``FieldDecl.type_name``
+        — well-formed by construction (the parser only ever produces
+        balanced brackets).
+    """
+    if "[" not in expr:
+        return expr, []
+    base, _, rest = expr.partition("[")
+    inner = rest[:-1]  # strip the matching trailing ']'
+    return base, [p.strip() for p in _split_top_level_commas(inner)]
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    """Split *text* on commas at bracket depth 0, keeping nested groups intact.
+
+    :param text: comma-separated text — the inside of a generic's brackets.
+    """
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(text):
+        depth += _bracket_delta(ch)
+        if ch == "," and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return parts
+
+
+def _bracket_delta(ch: str) -> int:
+    """Return ``+1`` for ``[``, ``-1`` for ``]``, ``0`` otherwise."""
+    if ch == "[":
+        return 1
+    if ch == "]":
+        return -1
+    return 0
 
 
 def _resolve_type(name: str, types: dict[str, type]) -> type:
