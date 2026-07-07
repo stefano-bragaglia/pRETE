@@ -3,7 +3,7 @@
 A pure-Python implementation of the Rete algorithm for production rule systems,
 matching over arbitrary Python objects (POPOs — Plain Old Python Objects).
 
-![pRETE logo](https://raw.githubusercontent.com/stefano-bragaglia/pRETE/main/images/pRETE-logo-small.png)
+![pRETE logo](https://raw.githubusercontent.com/stefano-bragaglia/pRETE/main/images/pRETE-logo-small-wide.png)
 
 [![CI](https://github.com/stefano-bragaglia/pRETE/actions/workflows/ci.yml/badge.svg)](https://github.com/stefano-bragaglia/pRETE/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/prete)](https://pypi.org/project/prete/)
