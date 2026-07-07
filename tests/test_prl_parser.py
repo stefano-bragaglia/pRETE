@@ -131,10 +131,44 @@ class TestParseDeclare:
         dd = _parse("declare Marker\n  @deprecated\nend").declares[0]
         assert dd.fields == ()
 
-    def test_generic_type_name_stripped(self) -> None:
-        # lines 185, 189-196: Java-style generic in field type is skipped
-        dd = _parse("declare Box\n  items: List<String>\nend").declares[0]
-        assert dd.fields[0].type_name == "List"
+    def test_bracket_generic_stored_verbatim(self) -> None:
+        # 5-declare-field-defaults story 1: Python-bracket generics replace
+        # the old Java-diamond form; the type expression is preserved (not
+        # erased) for the compiler to resolve.
+        dd = _parse("declare Box\n  items: list[str]\nend").declares[0]
+        assert dd.fields[0].type_name == "list[str]"
+
+    def test_bracket_generic_multiple_params(self) -> None:
+        dd = _parse("declare Box\n  totals: dict[str, int]\nend").declares[0]
+        assert dd.fields[0].type_name == "dict[str, int]"
+
+    def test_bracket_generic_normalises_spacing(self) -> None:
+        dd = _parse("declare Box\n  totals: dict[str,int]\nend").declares[0]
+        assert dd.fields[0].type_name == "dict[str, int]"
+
+    def test_nested_bracket_generic(self) -> None:
+        dd = _parse(
+            "declare Box\n  rows: list[dict[str, int]]\nend"
+        ).declares[0]
+        assert dd.fields[0].type_name == "list[dict[str, int]]"
+
+    def test_diamond_generic_no_longer_parses(self) -> None:
+        # Java-style List<String> is rejected outright, not silently
+        # erased to "List" as it was before this story.
+        with pytest.raises(SyntaxError):
+            _parse("declare Box\n  items: List<String>\nend")
+
+    def test_unbalanced_bracket_generic_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse("declare Box\n  items: list[str\nend")
+
+    def test_empty_bracket_generic_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse("declare Box\n  items: list[]\nend")
+
+    def test_trailing_comma_bracket_generic_raises(self) -> None:
+        with pytest.raises(SyntaxError):
+            _parse("declare Box\n  items: dict[str,]\nend")
 
 
 # ===========================================================================

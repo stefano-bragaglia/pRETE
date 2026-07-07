@@ -92,6 +92,45 @@ class TestJavaType:
 
 
 # ===========================================================================
+# Java type mapping — bracket generics (5-declare-field-defaults story 1)
+# ===========================================================================
+
+class TestJavaTypeGenerics:
+    """``_java_type`` resolves Python-bracket generics, preserving params.
+
+    Replaces the old Java-diamond form (``List<String>``), which was always
+    erased to the base name only. The parsed parameter(s) must survive into
+    the resolved type instead of being discarded.
+    """
+
+    def test_single_param_generic(self) -> None:
+        assert _java_type("list[str]", {}) == list[str]
+
+    def test_multi_param_generic(self) -> None:
+        assert _java_type("dict[str, int]", {}) == dict[str, int]
+
+    def test_nested_generic(self) -> None:
+        assert _java_type("list[dict[str, int]]", {}) == list[dict[str, int]]
+
+    def test_generic_param_uses_java_alias_mapping(self) -> None:
+        # Java-primitive scalar mapping is unaffected by this story — it
+        # still applies when a primitive name appears as a generic param.
+        assert _java_type("list[String]", {}) == list[str]
+
+    def test_generic_param_unknown_falls_back_to_any(self) -> None:
+        from typing import Any
+        assert _java_type("list[Blob]", {}) == list[Any]
+
+    def test_generic_param_resolves_user_type(self) -> None:
+        assert _java_type("list[_Temp]", _TYPES) == list[_Temp]
+
+    def test_generic_base_type_still_resolves_user_type(self) -> None:
+        # base name resolution (types dict, then _JAVA_TO_PY, then Any) is
+        # unchanged — only param handling is new.
+        assert _java_type("float", _TYPES) is float
+
+
+# ===========================================================================
 # Declare compilation
 # ===========================================================================
 
@@ -122,6 +161,19 @@ class TestCompileDeclare:
         cls = _compile_declare(decl, {})
         obj = cls(value=42.0)
         assert obj.value == 42.0
+
+    def test_generic_field_annotation_preserved(self) -> None:
+        # 5-declare-field-defaults story 1: the compiled field is annotated
+        # list[str], not bare list — the old diamond-generic form erased
+        # this; the new bracket form must not.
+        decl = DeclareDecl("Box", (FieldDecl("items", "list[str]"),))
+        cls = _compile_declare(decl, {})
+        assert dc_fields(cls)[0].type == list[str]
+
+    def test_nested_generic_field_annotation_preserved(self) -> None:
+        decl = DeclareDecl("Box", (FieldDecl("rows", "list[dict[str, int]]"),))
+        cls = _compile_declare(decl, {})
+        assert dc_fields(cls)[0].type == list[dict[str, int]]
 
 
 # ===========================================================================

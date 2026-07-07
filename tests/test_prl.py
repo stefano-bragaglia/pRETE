@@ -69,6 +69,17 @@ class TestDeclare:
         obj = types["Outer"](inner=types["Inner"](x=5))
         assert obj.inner.x == 5
 
+    def test_bracket_generic_field(self) -> None:
+        # 5-declare-field-defaults story 1: Python-bracket generics
+        # (replacing the old, erased Java-diamond form) end-to-end.
+        src = "declare Dataset\n  tags: list[str]\n  totals: dict[str, int]\nend"
+        _, types = _setup(src)
+        flds = dc_fields(types["Dataset"])
+        assert flds[0].type == list[str]
+        assert flds[1].type == dict[str, int]
+        obj = types["Dataset"](tags=["a", "b"], totals={"x": 1})
+        assert obj.tags == ["a", "b"]
+
 
 # ===========================================================================
 # OOPath patterns
