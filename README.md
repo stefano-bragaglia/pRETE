@@ -466,6 +466,7 @@ pytest --cov
 ---
 
 ## History
+- **v2.5.2** — improving documentation and adding links to sister projects
 - **v2.5.1** — test suite expanded to 99%+ coverage
 - **v2.5.0** — ten PRL language extensions: `extends`, `@key`, positional/named constraints, `@no-loop` tag, `import`, `or`/`forall`, `exists`, CEP (`@role`/`@timestamp`/`@expires`), `accumulate`; new `ExistsNode` and `AccumulateNode` beta nodes; logical clock; examples reorganised into `declarative/` and `programmatic/`
 - **v2.1.0** — PRL parser: `load_prl()`, `.prl` files, lexer / AST / compiler pipeline

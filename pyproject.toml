@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prete"
-version = "2.5.1"
+version = "2.5.2"
 description = "Pure-Python implementation of the Rete algorithm for production rule systems"
 readme = "README.md"
 license = {text = "MIT"}

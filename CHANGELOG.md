@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.2] — 2026-07-07
+
+**Documentation.**
+
+### Added
+- Link to [prl-highlight](https://github.com/stefano-bragaglia/prl-highlight),
+  the PyCharm `.prl` syntax-highlighting plugin, in the PRL section of the README.
+
+### Changed
+- README logo swapped for the wide variant.
+- `pyproject.toml` classifiers extended to cover Python 3.14.
+
+---
+
 ## [2.5.1] — 2026-06-21
 
 **Test coverage.**
