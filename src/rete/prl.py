@@ -23,7 +23,7 @@ import importlib
 import operator
 import re
 import textwrap
-from dataclasses import field, make_dataclass
+from dataclasses import Field, field, make_dataclass
 from functools import partial
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Callable
@@ -246,7 +246,7 @@ def _field_spec(fd: FieldDecl, types: dict[str, type]) -> tuple:
 
 def _default_field(
     default: None | bool | int | float | str | ContainerLiteral,
-):
+) -> Field[Any]:
     """Return a ``dataclasses.field(...)`` for a parsed default value.
 
     A :class:`ContainerLiteral` becomes ``default_factory`` — a fresh

@@ -175,6 +175,12 @@ class Parser:
         return DeclareDecl(name, tuple(fields), extends, tags)
 
     def _parse_field(self, tags: tuple[Tag, ...] = ()) -> FieldDecl:
+        """Parse one ``declare``-block field: ``identifier ':' type_ref``,
+        with an optional ``'=' default_value`` clause.
+
+        :param tags: zero or more tags collected before this field by the
+            caller (:meth:`_parse_declare`).
+        """
         name = self._expect("IDENT").value
         self._expect("PUNCT", ":")
         type_name = self._parse_type_ref()
@@ -213,8 +219,13 @@ class Parser:
         return self._parse_literal()
 
     def _parse_list_literal(self) -> ContainerLiteral:
+        """Parse ``'[' [ default_value (',' default_value)* ] ']'``.
+
+        :raises SyntaxError: on a missing closing ``]`` or a trailing comma
+            (via the underlying ``_expect``/``_parse_default_value`` calls).
+        """
         self._expect("PUNCT", "[")
-        elements: list = []
+        elements: list[None | bool | int | float | str | ContainerLiteral] = []
         if not self._peek_punct("]"):
             elements.append(self._parse_default_value())
             while self._peek_punct(","):
@@ -224,8 +235,13 @@ class Parser:
         return ContainerLiteral("list", tuple(elements))
 
     def _parse_dict_literal(self) -> ContainerLiteral:
+        """Parse ``'{' [ dict_pair (',' dict_pair)* ] '}'``.
+
+        :raises SyntaxError: on a missing closing ``}`` or a trailing comma
+            (via the underlying ``_expect``/``_parse_dict_pair`` calls).
+        """
         self._expect("PUNCT", "{")
-        pairs: list = []
+        pairs: list[tuple] = []
         if not self._peek_punct("}"):
             pairs.append(self._parse_dict_pair())
             while self._peek_punct(","):
@@ -235,6 +251,9 @@ class Parser:
         return ContainerLiteral("dict", tuple(pairs))
 
     def _parse_dict_pair(self) -> tuple:
+        """Parse one ``default_value ':' default_value`` key/value pair
+        inside a ``{}`` dict-literal default.
+        """
         key = self._parse_default_value()
         self._expect("PUNCT", ":")
         value = self._parse_default_value()
