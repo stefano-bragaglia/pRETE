@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.3] — 2026-07-07
+
+**Extending API change — `declare` field defaults and Python-bracket generics.**
+
+### Added
+- `declare` block fields may carry an optional default value
+  (`field: type = value`), mirroring Python's own `@dataclass`: scalar
+  literals (`None`/`null`, `str`, `int`, `float`, `bool`) and container
+  literals (`[]`/`{}`, empty or with literal elements). Mutable defaults
+  compile transparently to `dataclasses.field(default_factory=...)`, so
+  every instance gets its own list/dict rather than one shared, aliased
+  default. Field-ordering violations (a non-defaulted field following a
+  defaulted one, including across `extends` and externally-supplied
+  `types=` parents) surface as the same `TypeError`
+  `dataclasses`/`make_dataclass` already raises natively — no separate
+  validation was needed.
+- `declare` block field types now use Python-bracket generics
+  (`list[str]`, `dict[str, int]`, arbitrarily nested) in place of the old,
+  erased Java-diamond form. The parsed parameter is preserved as the
+  compiled field's real type annotation instead of being discarded.
+
+### Changed
+- `src/rete/prl_ast.py` — new `ContainerLiteral` node; `FieldDecl` gains
+  `has_default` / `default`.
+- `src/rete/prl_parser.py` — `_parse_type_ref` / new `_parse_type_params`
+  replace the old diamond-erasing `_skip_generic`; `_parse_field` parses
+  an optional `= value` clause via new `_parse_optional_default` /
+  `_parse_default_value` / `_parse_list_literal` / `_parse_dict_literal`.
+- `src/rete/prl.py` — `_java_type` resolves bracket-generic expressions
+  recursively (new `_resolve_base_type`, `_split_generic`,
+  `_split_top_level_commas`); `_compile_declare`'s field list now goes
+  through new `_field_spec` / `_default_field` to honour a default.
+
+### Removed
+- Java-style diamond generics (`List<String>`) in `declare` blocks are no
+  longer accepted — always accepted-but-erased since v2.1.0, so no
+  runtime behavior anyone could depend on changes, only the accepted
+  surface syntax. Existing `.prl` files using this form must be
+  rewritten to bracket generics (`list[str]`).
+
+### Fixed
+- Removed a stale `omit = ["src/rete/drl.py"]` entry from
+  `pyproject.toml`'s coverage config — that file (the regex-based DRL
+  prototype superseded by `prl.py`) no longer exists anywhere in the
+  tree.
+
+### Notes
+- Set/tuple literal defaults (`{1, 2}`, `(1, 2)`) are not supported — no
+  concrete use case needed them, and `{}` is unambiguously an empty dict
+  in this grammar, matching Python itself.
+- Addresses [pRETE#1](https://github.com/stefano-bragaglia/pRETE/issues/1).
+
+---
+
 ## [2.5.2] — 2026-07-07
 
 **Documentation.**
