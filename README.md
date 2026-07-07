@@ -308,6 +308,13 @@ objects and hands them to the engine.
 | `@role(event)` / `@timestamp` / `@expires` | CEP — events expire automatically after `advance_clock(t)` |
 | `accumulate` | `accumulate(Order($a: amount); $total: sum($a); $total > 1000)` |
 
+#### Field defaults and generics (v2.5.3)
+
+| Construct | Example |
+|---|---|
+| Field default | `stage: str = null`, `history: list[str] = []` — mirrors Python's `@dataclass`; mutable defaults never alias across instances |
+| Bracket generics | `list[str]`, `dict[str, int]` — replaces the old, erased Java-diamond form (`List<String>`) |
+
 ### Quick start
 
 ```
