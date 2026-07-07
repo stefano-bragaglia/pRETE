@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.3.1] — 2026-07-07
+
+**Documentation.**
+
+### Added
+- "What PRL supports" table in `README.md` gained a v2.5.3 section
+  documenting `declare` field defaults and Python-bracket generics —
+  present on `main` when 2.5.3 was tagged but missed before that version
+  was published to PyPI.
+
+### Notes
+- PyPI does not allow re-uploading files under an already-published
+  version number (`2.5.3`'s files are permanently reserved), so this
+  README-only fix required a new version rather than amending 2.5.3 in
+  place.
+- `2.5.3.1` is valid [PEP 440](https://peps.python.org/pep-0440/) (sorts
+  correctly between `2.5.3` and `2.5.4`) but is not strict
+  [SemVer](https://semver.org/spec/v2.0.0.html) (`MAJOR.MINOR.PATCH`
+  only) — a deliberate, one-off exception to the versioning scheme this
+  file otherwise claims to follow, made to avoid a disproportionate
+  `2.5.4` bump for a single README table.
+
+---
+
 ## [2.5.3] — 2026-07-07
 
 **Extending API change — `declare` field defaults and Python-bracket generics.**
