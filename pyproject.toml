@@ -74,7 +74,6 @@ pythonpath = ["src"]
 
 [tool.coverage.run]
 source = ["src/rete"]
-omit = ["src/rete/drl.py"]
 
 [tool.coverage.report]
 fail_under = 80
