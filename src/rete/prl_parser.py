@@ -180,20 +180,35 @@ class Parser:
         return FieldDecl(name, type_name, tags)
 
     def _parse_type_ref(self) -> str:
+        """Parse a type name, optionally followed by Python-bracket generic
+        parameters (``list[str]``, ``dict[str, int]``, arbitrarily nested).
+
+        Returns the type expression exactly as written (whitespace
+        normalised), for the compiler to resolve. Java-style diamond
+        generics (``List<String>``) are no longer accepted here — a bare
+        ``<`` after the type name is simply not consumed, so it surfaces as
+        an unexpected token to the caller.
+        """
         name = self._expect("IDENT").value
-        if self._peek_op("<"):
-            self._skip_generic()
+        if self._peek_punct("["):
+            name = f"{name}[{self._parse_type_params()}]"
         return name
 
-    def _skip_generic(self) -> None:
-        self._advance()  # consume '<'
-        depth = 1
-        while depth > 0:
-            t = self._advance()
-            if t.value == "<":
-                depth += 1
-            elif t.value == ">":
-                depth -= 1
+    def _parse_type_params(self) -> str:
+        """Parse ``'[' type_ref (',' type_ref)* ']'``; return the joined,
+        comma-space-normalised parameter text (brackets excluded).
+
+        :raises SyntaxError: on an empty parameter list, a trailing comma,
+            or a missing closing ``]`` — all via the underlying ``_expect``
+            calls' own error reporting.
+        """
+        self._expect("PUNCT", "[")
+        params = [self._parse_type_ref()]
+        while self._peek_punct(","):
+            self._advance()
+            params.append(self._parse_type_ref())
+        self._expect("PUNCT", "]")
+        return ", ".join(params)
 
     # ------------------------------------------------------------------
     # Rules and attributes

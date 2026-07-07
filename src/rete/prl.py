@@ -18,6 +18,7 @@ The compiler has three sub-tasks:
 """
 from __future__ import annotations
 
+import builtins
 import importlib
 import operator
 import re
@@ -320,15 +321,86 @@ def _inject_key_eq(cls: type, key_names: tuple[str, ...]) -> None:
 def _java_type(name: str, types: dict[str, type]) -> type:
     """Resolve a PRL type name to a Python type.
 
-    User-declared types take priority over ``_JAVA_TO_PY``.
-    Unknown names fall back to ``typing.Any``.
+    Handles bracket-generic expressions (``list[str]``, ``dict[str, int]``,
+    arbitrarily nested) by resolving the base name and each parameter
+    recursively, then reassembling via native subscription (PEP 585).
 
-    :param name: type name string from a ``FieldDecl``.
+    :param name: type name string from a ``FieldDecl`` — a bare name or a
+        bracket-generic expression exactly as parsed.
+    :param types: current type mapping.
+    """
+    base, params = _split_generic(name)
+    resolved_base = _resolve_base_type(base, types)
+    if not params:
+        return resolved_base
+    resolved_params = tuple(_java_type(p, types) for p in params)
+    return resolved_base[resolved_params]
+
+
+def _resolve_base_type(name: str, types: dict[str, type]) -> type:
+    """Resolve a bare (non-generic) type name to a Python type.
+
+    Resolution order: previously declared/user-supplied types, then the
+    Java-primitive-name alias table, then Python builtins (covers container
+    base names — ``list``, ``dict``, ``set``, ``tuple`` — for bracket-generic
+    expressions), then ``typing.Any`` as the final fallback. Only an actual
+    ``type`` object from ``builtins`` is accepted; a builtin function or
+    module name (e.g. ``print``) falls through to ``Any`` like any other
+    unresolvable name.
+
+    :param name: a single, non-bracketed type name.
     :param types: current type mapping.
     """
     if name in types:
         return types[name]
-    return _JAVA_TO_PY.get(name, Any)
+    if name in _JAVA_TO_PY:
+        return _JAVA_TO_PY[name]
+    candidate = getattr(builtins, name, None)
+    return candidate if isinstance(candidate, type) else Any
+
+
+def _split_generic(expr: str) -> tuple[str, list[str]]:
+    """Split ``"base[p1, p2]"`` into ``("base", ["p1", "p2"])``.
+
+    A bare name (no ``[``) returns ``(expr, [])``. Comma-splitting respects
+    nested brackets, so a param that is itself a bracket-generic expression
+    is kept intact as one entry.
+
+    :param expr: type expression exactly as stored on ``FieldDecl.type_name``
+        — well-formed by construction (the parser only ever produces
+        balanced brackets).
+    """
+    if "[" not in expr:
+        return expr, []
+    base, _, rest = expr.partition("[")
+    inner = rest[:-1]  # strip the matching trailing ']'
+    return base, [p.strip() for p in _split_top_level_commas(inner)]
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    """Split *text* on commas at bracket depth 0, keeping nested groups intact.
+
+    :param text: comma-separated text — the inside of a generic's brackets.
+    """
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(text):
+        depth += _bracket_delta(ch)
+        if ch == "," and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return parts
+
+
+def _bracket_delta(ch: str) -> int:
+    """Return ``+1`` for ``[``, ``-1`` for ``]``, ``0`` otherwise."""
+    if ch == "[":
+        return 1
+    if ch == "]":
+        return -1
+    return 0
 
 
 def _resolve_type(name: str, types: dict[str, type]) -> type:
