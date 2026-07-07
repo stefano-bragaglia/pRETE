@@ -9,6 +9,7 @@ from rete.prl_ast import (
     AccumulateExpr,
     BindConstraint,
     CompareConstraint,
+    ContainerLiteral,
     DeclareDecl,
     FieldDecl,
     ForallNode,
@@ -177,7 +178,67 @@ class Parser:
         name = self._expect("IDENT").value
         self._expect("PUNCT", ":")
         type_name = self._parse_type_ref()
-        return FieldDecl(name, type_name, tags)
+        has_default, default = self._parse_optional_default()
+        return FieldDecl(name, type_name, tags, has_default, default)
+
+    def _parse_optional_default(
+        self,
+    ) -> tuple[bool, None | bool | int | float | str | ContainerLiteral]:
+        """Parse an optional ``'=' default_value`` clause after a field's type.
+
+        :returns: ``(has_default, default)`` — ``(False, None)`` when no
+            ``=`` clause is present.
+        """
+        if not self._peek_op("="):
+            return False, None
+        self._advance()
+        return True, self._parse_default_value()
+
+    def _parse_default_value(
+        self,
+    ) -> None | bool | int | float | str | ContainerLiteral:
+        """Parse one default-value token: a scalar literal, or a ``[]``/
+        ``{}`` container literal (each element parsed the same way, so
+        nesting works for free without extra handling).
+
+        Deliberately does not accept a ``$var`` reference — a default must
+        be a compile-time constant, not a runtime binding.
+        """
+        if self._peek_punct("["):
+            return self._parse_list_literal()
+        if self._peek_punct("{"):
+            return self._parse_dict_literal()
+        if self._peek_kind("STRING"):
+            return self._advance().value[1:-1]
+        return self._parse_literal()
+
+    def _parse_list_literal(self) -> ContainerLiteral:
+        self._expect("PUNCT", "[")
+        elements: list = []
+        if not self._peek_punct("]"):
+            elements.append(self._parse_default_value())
+            while self._peek_punct(","):
+                self._advance()
+                elements.append(self._parse_default_value())
+        self._expect("PUNCT", "]")
+        return ContainerLiteral("list", tuple(elements))
+
+    def _parse_dict_literal(self) -> ContainerLiteral:
+        self._expect("PUNCT", "{")
+        pairs: list = []
+        if not self._peek_punct("}"):
+            pairs.append(self._parse_dict_pair())
+            while self._peek_punct(","):
+                self._advance()
+                pairs.append(self._parse_dict_pair())
+        self._expect("PUNCT", "}")
+        return ContainerLiteral("dict", tuple(pairs))
+
+    def _parse_dict_pair(self) -> tuple:
+        key = self._parse_default_value()
+        self._expect("PUNCT", ":")
+        value = self._parse_default_value()
+        return (key, value)
 
     def _parse_type_ref(self) -> str:
         """Parse a type name, optionally followed by Python-bracket generic

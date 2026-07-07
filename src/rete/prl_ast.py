@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 __all__ = [
     "Tag",
+    "ContainerLiteral",
     "FieldDecl",
     "DeclareDecl",
     "ImportDecl",
@@ -42,19 +43,46 @@ class Tag:
 
 
 @dataclass(frozen=True)
+class ContainerLiteral:
+    """A ``[]``/``{}`` container-literal default value on a ``declare`` field.
+
+    Kept tuple-based (not a raw ``list``/``dict``) so a :class:`FieldDecl`
+    carrying one stays hashable — the compiler materialises the actual
+    mutable container at ``default_factory`` time, once per instance.
+
+    :param kind: ``"list"`` or ``"dict"``.
+    :param elements: for ``"list"``, a tuple of literal values in order; for
+        ``"dict"``, a tuple of ``(key, value)`` literal pairs in order.
+    """
+
+    kind: str
+    elements: tuple
+
+
+@dataclass(frozen=True)
 class FieldDecl:
     """One field inside a ``declare`` block.
 
     :param name: field identifier, e.g. ``"value"``.
-    :param type_name: base type name after generic erasure, e.g. ``"double"``.
-        Generic parameters (``List<Integer>``) are stripped by the parser;
-        the compiler maps this name via ``_JAVA_TO_PY``.
+    :param type_name: type expression exactly as written, e.g. ``"double"``
+        or a bracket-generic expression like ``"list[str]"``; the compiler
+        resolves it (recursively for generics) via ``_java_type``.
     :param tags: zero or more :class:`Tag` annotations preceding this field.
+    :param has_default: ``True`` if the field had a ``= value`` clause.
+        Needed to distinguish an explicit ``= null`` default (``has_default``
+        ``True``, ``default`` ``None``) from no default at all (``has_default``
+        ``False``, ``default`` ``None``) — both leave ``default`` as ``None``.
+    :param default: the parsed default value when ``has_default`` is
+        ``True``: a scalar literal (``None``/``str``/``int``/``float``/
+        ``bool``) or a :class:`ContainerLiteral`. Meaningless when
+        ``has_default`` is ``False``.
     """
 
     name: str
     type_name: str
     tags: tuple[Tag, ...] = ()
+    has_default: bool = False
+    default: None | bool | int | float | str | ContainerLiteral = None
 
 
 @dataclass(frozen=True)

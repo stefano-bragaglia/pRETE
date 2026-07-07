@@ -23,7 +23,8 @@ import importlib
 import operator
 import re
 import textwrap
-from dataclasses import make_dataclass
+from dataclasses import field, make_dataclass
+from functools import partial
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Callable
 
@@ -33,6 +34,7 @@ from rete.prl_ast import (
     AccumulateExpr,
     BindConstraint,
     CompareConstraint,
+    ContainerLiteral,
     DeclareDecl,
     FieldDecl,
     ForallNode,
@@ -208,7 +210,7 @@ def _compile_declare(decl: DeclareDecl, types: dict[str, type]) -> type:
     :param types: current type mapping (may include previously declared types).
     :returns: a new mutable dataclass class (not frozen — supports ``update``).
     """
-    fields = [(fd.name, _java_type(fd.type_name, types)) for fd in decl.fields]
+    fields = [_field_spec(fd, types) for fd in decl.fields]
     key_names = _key_fields(decl)
     kwargs: dict = {"eq": False} if key_names else {}
     if decl.extends:
@@ -220,6 +222,44 @@ def _compile_declare(decl: DeclareDecl, types: dict[str, type]) -> type:
         _inject_key_eq(cls, key_names)
     _attach_event_meta(cls, decl)
     return cls
+
+
+def _field_spec(fd: FieldDecl, types: dict[str, type]) -> tuple:
+    """Build one ``make_dataclass`` field entry, honouring a default.
+
+    Field-ordering violations (a non-defaulted field after a defaulted one,
+    including across ``extends``/an externally-supplied ``types=`` parent)
+    are not checked here — ``make_dataclass`` already raises the same
+    ``TypeError`` Python's own ``@dataclass`` raises, so no separate
+    validation is needed.
+
+    :param fd: the field declaration.
+    :param types: current type mapping, for resolving ``fd.type_name``.
+    :returns: ``(name, type)`` with no default, or ``(name, type,
+        dataclasses.field(...))`` when ``fd.has_default`` is set.
+    """
+    py_type = _java_type(fd.type_name, types)
+    if not fd.has_default:
+        return fd.name, py_type
+    return fd.name, py_type, _default_field(fd.default)
+
+
+def _default_field(
+    default: None | bool | int | float | str | ContainerLiteral,
+):
+    """Return a ``dataclasses.field(...)`` for a parsed default value.
+
+    A :class:`ContainerLiteral` becomes ``default_factory`` — a fresh
+    list/dict built per instance, never a shared, aliased default (the
+    classic Python mutable-default-argument bug). Any other (immutable)
+    value becomes a plain ``default``.
+
+    :param default: a scalar literal or a :class:`ContainerLiteral`.
+    """
+    if isinstance(default, ContainerLiteral):
+        ctor = list if default.kind == "list" else dict
+        return field(default_factory=partial(ctor, default.elements))
+    return field(default=default)
 
 
 def _key_fields(decl: DeclareDecl) -> tuple[str, ...]:
