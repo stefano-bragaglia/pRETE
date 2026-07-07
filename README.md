@@ -410,6 +410,8 @@ engine.run()
 
 The grammar is documented in [`reference/prl-grammar.ebnf`](reference/prl-grammar.ebnf).
 
+**Editor support:** [prl-highlight](https://github.com/stefano-bragaglia/prl-highlight) provides `.prl` syntax highlighting for PyCharm.
+
 ---
 
 ## Bundled examples
